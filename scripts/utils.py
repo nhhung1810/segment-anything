@@ -4,6 +4,17 @@ import numpy as np
 import glob
 from pathlib import Path
 
+import torchvision.transforms as T
+
+import torch
+
+def resize(im : np.ndarray, target_size = [256, 256]):
+    assert im.ndim <= 3, ''
+    _im = torch.Tensor(im)
+    _im = _im[None, ...] if im.ndim == 2 else _im
+    
+    [w, h] = target_size
+    return T.Resize(size = (w, h))(_im)
 
 def make_nested_dir(directory: str) -> str:
     """Make nested Directory
@@ -45,3 +56,9 @@ def generate_grid(w, h, est_n_point=16):
     samples = np.array(list(itertools.product(w_axis, h_axis))).astype(np.int32)
     labels = np.ones(n_axis_sampling**2)
     return samples, labels
+
+def mask_out(mask, xmin, xmax, ymin, ymax, to_value):
+    _mask = np.ones(mask.shape) == 1.0
+    _mask[xmin:xmax, ymin:ymax] = False
+    mask[_mask] = to_value
+    return mask
