@@ -22,8 +22,8 @@ def find_norm():
     mask_input_size = [4*x for x in model.model.prompt_encoder.image_embedding_size]
     model.set_image(img)
 
-    mean_candidate = np.linspace(0, 200, 20, dtype=np.int32)
-    std = np.linspace(0, 10, 20, dtype=np.int32)
+    mean_candidate = np.linspace(0, 20, 20, dtype=np.float32)
+    std = np.linspace(0, 4, 20, dtype=np.float32)
     # Norm dist
     norm_pseudo_mask = torch.randn(1, *mask_input_size, dtype=torch.float32)
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":
         max_activation - min_activation)
 
     sns.displot(df, x='mean', y='std')
-    sns.scatterplot(df['mean'], df['activation'])
+    sns.scatterplot(x=df['mean'], y=df['activation'])
     print(metadata)
 
 

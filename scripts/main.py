@@ -6,7 +6,7 @@ from segment_anything import SamPredictor, sam_model_registry
 from scipy.ndimage import gaussian_filter
 import numpy as np
 from utils import \
-    make_nested_dir, get_data_paths, GROUP1, GROUP3, \
+    make_nested_dir, get_data_paths, GROUP2, GROUP3, \
     load_file_npz, load_img, argmax_dist, mask_out, resize
 
 
@@ -122,9 +122,9 @@ def point_experiment():
 
 
 
-def mask_experiment():
+def mask_experiment(scale_factor):
     chosen_class = 1
-    data_path, mask_path = get_data_paths(GROUP1)
+    data_path, mask_path = get_data_paths(GROUP2)
     predictor = load_model()
     mask_input_size = [4*x for x in predictor.model.prompt_encoder.image_embedding_size]
     torch.randn(1, *mask_input_size, dtype=torch.float32)
@@ -160,13 +160,13 @@ def mask_experiment():
         
         predictor.set_image(img)
 
-        _mask = resize(mask == chosen_class) * 200  
+        _mask = resize(mask == chosen_class) * scale_factor
         # _mask = resize(predict_masks[2], [256, 256]) \
         #     if predict_masks is not None else None
         
-        if _mask is not None:
-            print(_mask.shape)
-            pass
+        # if _mask is not None:
+        #     print(_mask.shape)
+        #     pass
  
         predict_masks, _, _ = predictor.predict(
             # point_coords=point,
@@ -193,7 +193,7 @@ def mask_experiment():
             } for idx in range(predict_masks.shape[0])]
             )
         
-        r.add(None, np.array(_mask[0]), None, 'Input mask')
+        r.add(None, np.array(_mask[0]), None, f'Input mask - scale - {scale_factor}')
         
         r.show_all(save_path=save_fig)
         r.reset()
@@ -205,5 +205,10 @@ def mask_experiment():
 
 if __name__ == "__main__":
     # point_experiment()
-    mask_experiment()
+    for scale_factor in [1.0]:
+        print(f"Start exp - {scale_factor}")
+        try:
+            mask_experiment(scale_factor=scale_factor)
+        except Exception as msg:
+            print(f"Exp {scale_factor} with excep: {msg}")
     pass
