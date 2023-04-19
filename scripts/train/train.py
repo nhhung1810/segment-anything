@@ -1,9 +1,10 @@
 from typing import Optional, Tuple
 
 from tqdm import tqdm
-from scripts.utils import GROUP2, get_data_paths, load_img
+from scripts.train.loss import BinaryFocalLoss, DiceLoss, FocalLoss, SamLoss
+from scripts.utils import GROUP2, get_data_paths, load_file_npz, load_img
 from segment_anything.modeling.sam import Sam
-from segment_anything.build_sam import build_sam, sam_model_registry
+from segment_anything.build_sam import sam_model_registry
 
 import numpy as np
 import torch
@@ -189,9 +190,6 @@ class SamTrain:
 
         return masks, iou_predictions, low_res_masks
 
-    def train(self):
-        pass
-
 
 def load_model(
     checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type='vit_b'
@@ -209,11 +207,14 @@ def batch_cache_emb():
                                 desc="Prediction...",
                                 total=len(data_path)):
         img = load_img(path)
+        mask = torch.as_tensor(load_file_npz(mask_path))
         img_emb, original_size, input_size = sam_train.prepare_img(image=img)
         batch_data[path] = {
             "img_emb": img_emb,
             "original_size": original_size,
-            "input_si": input_size
+            "input_size": input_size,
+            "mask_path": mask_path,
+            'mask': mask
         }
         pass
 
@@ -225,29 +226,88 @@ def load_batch_emb(path):
     return torch.load(path)
 
 
-if __name__ == "__main__":
-    # batch_cache_emb()
-    import matplotlib.pyplot as plt
+def test_focal_loss():
+    batch_data: dict = load_batch_emb('batch_data.pt')
+    k = list(batch_data.keys())[0]
+    v = batch_data[k]
+
+    loss = BinaryFocalLoss(gamma=2)
+
+    target = torch.as_tensor(v['mask'] == 1).type(torch.int64)
+    # m1 = masks.detach()[0, 0]
+    good_loss: torch.Tensor = loss(input=target[None, ...], target=target)
+    bad_loss: torch.Tensor = loss(input=1 - target[None, ...], target=target)
+    assert (good_loss < bad_loss).all(), \
+        "Good loss should be small"
+    pass
+
+
+def test_dice_loss():
+    batch_data: dict = load_batch_emb('batch_data.pt')
+    k = list(batch_data.keys())[0]
+    v = batch_data[k]
+    loss = DiceLoss(activation=None)
+    target = torch.as_tensor(v['mask'] == 1).type(torch.int64)
+    good_loss: torch.Tensor = loss(input=target[None, ...], target=target)
+    bad_loss: torch.Tensor = loss(input=1 - target[None, ...], target=target)
+    print(f"🚀 ~ file: train.py:280 ~ good_loss: {good_loss} and {bad_loss}")
+
+
+def test_all_loss():
     batch_data: dict = load_batch_emb('batch_data.pt')
     k = list(batch_data.keys())[0]
     v = batch_data[k]
 
     sam = load_model()
     sam_train = SamTrain(sam_model=sam)
+
     masks, iou, low_res_masks = sam_train.predict_torch(
         image_emb=v['img_emb'],
-        input_size=v['input_si'],
+        input_size=v['input_size'],
         original_size=v['original_size'],
         multimask_output=True,
         return_logits=True
     )
 
-    masks = masks.detach().numpy()[0]
+    loss = SamLoss()
 
-    plt.imshow(masks[0])
-    plt.show()
+    # 1, H, W
+    target = torch.as_tensor(v['mask'] == 1).type(torch.int64)[None, ...]
+    pred = masks[:, 0, :, :]
+    iou = iou[:, 0]
+    _l = loss(pred, target, iou)
+    print("🚀 ~ file: train.py:279 ~ _l:", _l)
 
-    print(masks.shape)
+    pass
 
-    # print("🚀 ~ file: train.py:229 ~ batch_data:", batch_data)
+
+if __name__ == "__main__":
+    # import matplotlib.pyplot as plt
+    test_all_loss()
+    # batch_data: dict = load_batch_emb('batch_data.pt')
+    # k = list(batch_data.keys())[0]
+    # v = batch_data[k]
+
+    # sam = load_model()
+    # sam_train = SamTrain(sam_model=sam)
+
+    # masks, iou, low_res_masks = sam_train.predict_torch(
+    #     image_emb=v['img_emb'],
+    #     input_size=v['input_size'],
+    #     original_size=v['original_size'],
+    #     multimask_output=True,
+    #     return_logits=True
+    # )
+
+    # loss = DiceLoss(activation=None)
+
+    # target = torch.as_tensor(v['mask'] == 1).type(torch.int64)
+    # m1 = masks.detach()[0, 0]
+
+    # good_loss: torch.Tensor = loss(input=target[None, ...], target=target)
+    # bad_loss: torch.Tensor = loss(input=1 - target[None, ...], target=target)
+    # print(f"🚀 ~ file: train.py:280 ~ good_loss: {good_loss} and {bad_loss}")
+
+    # assert (good_loss < bad_loss).all(), "Good loss should be small"
+
     pass
