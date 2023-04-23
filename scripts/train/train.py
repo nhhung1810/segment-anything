@@ -1,7 +1,13 @@
 from typing import Optional, Tuple
 
 from tqdm import tqdm
-from scripts.train.loss import BinaryFocalLoss, DiceLoss, FocalLoss, MultimaskSamLoss, SamLoss
+from scripts.train.loss import (
+    BinaryFocalLoss,
+    DiceLoss,
+    FocalLoss,
+    MultimaskSamLoss,
+    SamLoss,
+)
 from scripts.utils import GROUP2, get_data_paths, load_file_npz, load_img
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
@@ -13,7 +19,6 @@ from segment_anything.utils.transforms import ResizeLongestSide
 
 
 class SamTrain:
-
     def __init__(
         self,
         sam_model: Sam,
@@ -47,9 +52,12 @@ class SamTrain:
         input_image = self.transform.apply_image(image)
         input_image_torch = torch.as_tensor(input_image, device=self.device)
         input_image_torch = input_image_torch.permute(2, 0, 1).contiguous()[
-            None, :, :, :]
+            None, :, :, :
+        ]
 
-        img_emb, original_size, input_size = self.calculate_emb(input_image_torch, image.shape[:2])
+        img_emb, original_size, input_size = self.calculate_emb(
+            input_image_torch, image.shape[:2]
+        )
         return img_emb, original_size, input_size
 
     @torch.no_grad()
@@ -95,7 +103,7 @@ class SamTrain:
         if point_coords is not None:
             coords_torch, labels_torch = self._prepare_point(
                 original_size, point_labels, point_coords
-                )
+            )
 
         if box is not None:
             box_torch = self._prepare_box(box, original_size)
@@ -120,12 +128,10 @@ class SamTrain:
 
     def _prepare_point(self, img_original_size, point_labels, point_coords):
         assert (
-                point_labels is not None
-            ), "point_labels must be supplied if point_coords is supplied."
+            point_labels is not None
+        ), "point_labels must be supplied if point_coords is supplied."
 
-        point_coords = self.transform.apply_coords(
-            point_coords, img_original_size
-        )
+        point_coords = self.transform.apply_coords(point_coords, img_original_size)
         coords_torch = torch.as_tensor(
             point_coords, dtype=torch.float, device=self.device
         )
@@ -181,9 +187,7 @@ class SamTrain:
         )
 
         # Upscale the masks to the original image resolution
-        masks = self.model.postprocess_masks(
-            low_res_masks, input_size, original_size
-        )
+        masks = self.model.postprocess_masks(low_res_masks, input_size, original_size)
 
         if not return_logits:
             masks = masks > self.model.mask_threshold
@@ -191,9 +195,7 @@ class SamTrain:
         return masks, iou_predictions, low_res_masks
 
 
-def load_model(
-    checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type='vit_b'
-) -> Sam:
+def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> Sam:
     sam: Sam = sam_model_registry[checkpoint_type](checkpoint=checkpoint)
     return sam
 
@@ -203,9 +205,9 @@ def batch_cache_emb():
     sam_train = SamTrain(sam_model=sam)
     data_path, mask_path = get_data_paths(GROUP2)
     batch_data = {}
-    for path, mask_path in tqdm(zip(data_path, mask_path),
-                                desc="Prediction...",
-                                total=len(data_path)):
+    for path, mask_path in tqdm(
+        zip(data_path, mask_path), desc="Prediction...", total=len(data_path)
+    ):
         img = load_img(path)
         mask = torch.as_tensor(load_file_npz(mask_path))
         img_emb, original_size, input_size = sam_train.prepare_img(image=img)
@@ -214,7 +216,7 @@ def batch_cache_emb():
             "original_size": original_size,
             "input_size": input_size,
             "mask_path": mask_path,
-            'mask': mask
+            "mask": mask,
         }
         pass
 

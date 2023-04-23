@@ -79,6 +79,7 @@ def test_sam_multi_mask_loss():
     v = batch_data[k]
 
     sam = load_model()
+    sam.image_encoder.requires_grad_(False)
     sam_train = SamTrain(sam_model=sam)
 
     masks_pred, iou_pred, _ = sam_train.predict_torch(
@@ -100,6 +101,10 @@ def test_sam_multi_mask_loss():
     iou = iou_pred.repeat_interleave(2, 0)
     _l1 = loss(pred, target, iou)
     assert _l1[0] == _l1[1], "Duplicate batch data should have the same loss"
+    _l1.mean().backward()
+    # Gradient start to flow here
+
+    # 
 
     target = _target[None].repeat_interleave(3, 0)[None].repeat_interleave(1, 0)
     pred = masks_pred.repeat_interleave(1, 0)
