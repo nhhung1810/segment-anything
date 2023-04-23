@@ -12,7 +12,23 @@ from scripts.train.train import SamTrain
 from segment_anything.modeling.image_encoder import ImageEncoderViT
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
-from scripts.utils import load_file_npz, load_img, make_nested_dir, omit, pick
+from scripts.utils import load_file_npz, load_img, make_nested_dir
+
+try:
+    from scripts.utils import omit, pick
+
+except Exception as msg:
+    print(f"Cannot import - {msg}. Proceed to backup plan")
+    def _pick(d: Dict[object, object], keys: List[object]):
+        return {k: v for k, v in d.items() if k in keys}
+
+
+    def _omit(d: Dict[object, object], keys: List[object]):
+        return {k: v for k, v in d.items() if k not in keys}
+    
+    pick = _pick
+    omit = _omit
+
 
 # Respective to root
 DATASET_ROOT = "./dataset/FLARE22-version1/"
@@ -123,9 +139,12 @@ class FLARE22(Dataset):
         train_metadata_path: str = TRAIN_METADATA,
         dataset_root: str = DATASET_ROOT,
         cache_name: str = "single_point_object_detect",
+        is_debug: bool = False,
+        is_save_gpu: bool = True,
     ) -> None:
         super().__init__()
         # For preprocess data
+        self.is_save_gpu = is_save_gpu
         self.pre_trained_sam = pre_trained_sam
         if pre_trained_sam:
             self.pre_trained_sam.eval()
@@ -135,7 +154,8 @@ class FLARE22(Dataset):
         self.file = SinglePointObjDetectFile(
             train_metadata_path=train_metadata_path, dataset_root=dataset_root
         )
-        self.file.data = self.file.data[: self.LIMIT]
+        if is_debug:
+            self.file.data = self.file.data[: self.LIMIT]
         self.cache_path = os.path.join(self.dataset_root, cache_name)
         make_nested_dir(self.cache_path)
         self.dataset = []
@@ -161,7 +181,6 @@ class FLARE22(Dataset):
             masks = load_file_npz(data["mask_path"])
             # If only contain BG -> skip
             if masks.max() == FLARE22_LABEL_ENUM.BACK_GROUND.value:
-                print(data["id_number"])
                 continue
             # Calculate the embedding
             img = load_img(data["img_path"])
@@ -179,7 +198,9 @@ class FLARE22(Dataset):
             pass
             data_dict["n_masks"] = np.unique(masks).shape[0]
             torch.save(data_dict, cache_path)
-            self.load_data_dict_into_dataset(data_dict)
+            if self.is_save_gpu:
+                self.load_data_dict_into_dataset(data_dict)
+                torch.cuda.empty_cache()
         pass
 
     def load_data_dict_into_dataset(self, data_dict):
