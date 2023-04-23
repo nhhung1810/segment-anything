@@ -12,23 +12,7 @@ from scripts.train.train import SamTrain
 from segment_anything.modeling.image_encoder import ImageEncoderViT
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
-from scripts.utils import load_file_npz, load_img, make_nested_dir
-
-try:
-    from scripts.utils import omit, pick
-
-except Exception as msg:
-    print(f"Cannot import - {msg}. Proceed to backup plan")
-    def _pick(d: Dict[object, object], keys: List[object]):
-        return {k: v for k, v in d.items() if k in keys}
-
-
-    def _omit(d: Dict[object, object], keys: List[object]):
-        return {k: v for k, v in d.items() if k not in keys}
-    
-    pick = _pick
-    omit = _omit
-
+from scripts.utils import load_file_npz, load_img, make_nested_dir, omit, pick
 
 # Respective to root
 DATASET_ROOT = "./dataset/FLARE22-version1/"
