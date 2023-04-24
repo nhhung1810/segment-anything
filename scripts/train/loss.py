@@ -1,5 +1,4 @@
 from typing import Union
-from cv2 import reduce
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -17,7 +16,7 @@ class FocalLoss(nn.Module):
         size_average=True,
         reduction: str = "none",
     ):
-        """Initilize the focal loss
+        """Initialize the focal loss
 
         Args:
             gamma (int, optional): the exponential component. Defaults to 0.

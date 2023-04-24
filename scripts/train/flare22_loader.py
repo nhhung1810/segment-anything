@@ -6,10 +6,8 @@ import os
 import torch
 from enum import Enum
 from typing import Dict, List, Optional
-from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
-from scripts.train.train import SamTrain
-from segment_anything.modeling.image_encoder import ImageEncoderViT
+from scripts.train.sam_train import SamTrain
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 from scripts.utils import load_file_npz, load_img, make_nested_dir, omit, pick
@@ -197,6 +195,17 @@ class FLARE22(Dataset):
             self.dataset.append({**_emb, "mask": v})
         pass
 
+    def self_check(self):
+        for idx, data in enumerate(self.dataset):
+            assert data["img_emb"].shape == (
+                1,
+                256,
+                64,
+                64,
+            ), f"{idx} - {data['img_emb'].shape}"
+            pass
+        pass
+
     def __getitem__(self, index) -> Dict:
         data = self.dataset[index]
         return self.format_batch(data)
@@ -212,11 +221,17 @@ class FLARE22(Dataset):
         """
 
         # Remove the batch element
-        data["img_emb"] = data["img_emb"][0]
-        data["original_size"] = torch.as_tensor(data["original_size"])
-        data["input_size"] = torch.as_tensor(data["input_size"])
+        img_emb = data["img_emb"][0]
+        original_size = torch.as_tensor(data["original_size"])
+        input_size = torch.as_tensor(data["input_size"])
+        mask = data["mask"]
 
-        return data
+        return dict(
+            img_emb=img_emb,
+            original_size=original_size,
+            input_size=input_size,
+            mask=mask,
+        )
 
     def __len__(self):
         return len(self.dataset)
@@ -229,8 +244,10 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 
 if __name__ == "__main__":
     sam = load_model()
-    dataset = FLARE22(pre_trained_sam=sam)
+    FLARE22.LIMIT = 20
+    dataset = FLARE22(is_debug=True, is_save_gpu=False)
     dataset.preprocess()
+    print(len(dataset))
     loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
     for batch in loader:
         for k, v in batch.items():

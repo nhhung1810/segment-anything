@@ -1,5 +1,5 @@
 from scripts.train.loss import BinaryFocalLoss, DiceLoss, MultimaskSamLoss, SamLoss
-from scripts.train.train import SamTrain, load_model
+from scripts.train.sam_train import SamTrain, load_model
 
 import torch
 from torch import Tensor
@@ -18,8 +18,8 @@ def test_focal_loss():
 
     target = torch.as_tensor(v["mask"] == 1).type(torch.int64)
     # m1 = masks.detach()[0, 0]
-    good_loss: torch.Tensor = loss(input=target[None, ...], target=target)
-    bad_loss: torch.Tensor = loss(input=1 - target[None, ...], target=target)
+    good_loss: Tensor = loss(input=target[None, ...], target=target)
+    bad_loss: Tensor = loss(input=1 - target[None, ...], target=target)
     assert (good_loss < bad_loss).all(), "Good loss should be small"
     pass
 
@@ -31,8 +31,8 @@ def test_dice_loss():
     loss = DiceLoss(activation=None)
     target = torch.as_tensor(v["mask"] == 1).type(torch.int64)
 
-    good_loss: torch.Tensor = loss(input=target[None, ...], target=target[None, ...])
-    bad_loss: torch.Tensor = loss(input=1 - target[None, ...], target=target[None, ...])
+    good_loss: Tensor = loss(input=target[None, ...], target=target[None, ...])
+    bad_loss: Tensor = loss(input=1 - target[None, ...], target=target[None, ...])
     print(f"🚀 ~ file: test_loss.py:42 ~ good_loss: {good_loss} and {bad_loss}")
 
 
