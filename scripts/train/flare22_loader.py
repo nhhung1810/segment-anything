@@ -14,7 +14,6 @@ from scripts.utils import (
     load_file_npz,
     load_img,
     make_directory,
-    make_nested_dir,
     omit,
     pick,
 )
@@ -146,7 +145,7 @@ class FLARE22(Dataset):
         if is_debug:
             self.file.data = self.file.data[: self.LIMIT]
         self.cache_path = os.path.join(self.dataset_root, cache_name)
-        make_nested_dir(self.cache_path)
+        make_directory(self.cache_path)
         self.dataset = []
 
     def preload(self, strict=False):
