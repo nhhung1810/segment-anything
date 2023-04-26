@@ -123,9 +123,11 @@ class FLARE22(Dataset):
         cache_name: str = "single_point_object_detect",
         is_debug: bool = False,
         is_save_gpu: bool = True,
+        device:str = 'cpu'
     ) -> None:
         super().__init__()
         # For preprocess data
+        self.device = device
         self.is_save_gpu = is_save_gpu
         self.pre_trained_sam = pre_trained_sam
         if pre_trained_sam:
@@ -227,10 +229,10 @@ class FLARE22(Dataset):
         mask = data["mask"]
 
         return dict(
-            img_emb=img_emb,
-            original_size=original_size,
-            input_size=input_size,
-            mask=mask,
+            img_emb=img_emb.to(self.device),
+            original_size=original_size.to(self.device),
+            input_size=input_size.to(self.device),
+            mask=mask.to(self.device),
         )
 
     def __len__(self):
@@ -245,7 +247,7 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 if __name__ == "__main__":
     sam = load_model()
     FLARE22.LIMIT = 20
-    dataset = FLARE22(is_debug=True, is_save_gpu=False)
+    dataset = FLARE22(is_debug=False, is_save_gpu=False)
     dataset.preprocess()
     print(len(dataset))
     loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)

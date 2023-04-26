@@ -17,7 +17,6 @@ import loguru
 from sacred import Experiment
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
-from sympy import FlagError
 from torch import Tensor
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import StepLR
@@ -52,10 +51,11 @@ def config():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # NOTE: the effective batch-size will = batch_size * gradient_accumulation_step
-    batch_size = 4
+    batch_size = 32
     logdir = f"runs/{NAME}-{TIME}"
     resume_iteration = None
     n_epochs = 100
+    save_epoch = 20
 
     # NOTE
     gradient_accumulation_step = 1
@@ -80,9 +80,8 @@ def config():
 
 
 @ex.capture
-def make_dataset(batch_size) -> Tuple[FLARE22, DataLoader]:
-    FLARE22.LIMIT = 20
-    dataset = FLARE22(is_debug=True, is_save_gpu=False)
+def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
+    dataset = FLARE22(is_debug=False, is_save_gpu=False, device=device)
     dataset.preprocess()
     dataset.self_check()
     loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
@@ -111,16 +110,6 @@ def make_model(
         logger.warning("Fresh-new model is initialized")
         optimizer = torch.optim.Adam(model.parameters(), learning_rate)
         resume_iteration = 0
-    # else:
-    #     model_path = os.path.join(logdir, f"model-{resume_iteration}.pt")
-    #     logger.success(f"Load pre-trained model at {model_path}")
-    #     model.load_state_dict(torch.load(model_path))
-    #     optimizer = torch.optim.Adam(model.parameters(), learning_rate)
-
-    # if isinstance(label_smoothing, float):
-    #     model.criterion = torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    #     logger.success(f"Enable label smoothing of {label_smoothing}")
-    #     pass
 
     logger.info("Pretty print")
     summary(model)
@@ -135,6 +124,8 @@ def make_model(
         reduction="mean", focal_alpha=focal_alpha, focal_gamma=focal_gamma
     )
 
+    loss_fnc.to(device=device)
+
     return sam_train, optimizer, scheduler, loss_fnc
 
 
@@ -143,6 +134,7 @@ def train(
     logdir,
     device,
     n_epochs,
+    save_epoch,
     clip_gradient_norm,
     gradient_accumulation_step,
 ):
@@ -159,11 +151,14 @@ def train(
     assert isinstance(loss_fnc, MultimaskSamLoss), ""
 
     optimizer.zero_grad()
-    loop = tqdm(range(0, n_epochs), total=n_epochs, desc="Training...")
-    for i in loop:
-        for batch in tqdm(loader, desc=f"Epoch {i}", leave=False):
+    sam_train.model.train()
+    loop = tqdm(range(1, n_epochs + 1), total=n_epochs, desc="Training...")
+    for idx in loop:
+        for batch in tqdm(loader, desc=f"Epoch {idx}", leave=False):
+            
             img_emb: Tensor = batch["img_emb"]
             mask: Tensor = batch["mask"]
+            
             input_size = batch["input_size"]
             original_size = batch["original_size"]
             masks_pred, iou_pred, _ = sam_train.predict_torch(
@@ -174,6 +169,7 @@ def train(
                 return_logits=True,
             )
 
+            # Make 3 mask for 3 mult-mask of model
             mask = mask.unsqueeze(1).repeat_interleave(3, dim=1).type(torch.int64)
 
             loss = loss_fnc.forward(
@@ -187,14 +183,21 @@ def train(
             loss.backward()
 
             # This will update the gradient at once
-            if i % gradient_accumulation_step == 0:
+            if idx % gradient_accumulation_step == 0:
                 optimizer.step()
                 scheduler.step()
                 # NOTE: clear the gradient
                 optimizer.zero_grad()
 
-            #  This will prevent the gradient from explosion
-            if clip_gradient_norm:
-                clip_grad_norm_(sam_train.model.parameters(), clip_gradient_norm)
 
-            writer.add_scalar("train/loss", loss.item(), global_step=i)
+            writer.add_scalar("train/loss", loss.item(), global_step=idx)
+            pass
+
+        # End 1 batch
+        if idx % save_epoch == 0:
+            sam_train.model.to('cpu')
+            model_path = os.path.join(logdir, f"model-{idx}.pt")
+            torch.save(sam_train.model.state_dict(), model_path)
+            sam_train.model.to(device)
+            pass
+
