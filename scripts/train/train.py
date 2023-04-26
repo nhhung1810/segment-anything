@@ -33,7 +33,7 @@ from scripts.utils import summary
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 
-NAME = "sam_simple_obj_train"
+NAME = "sam-fix-iou"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
