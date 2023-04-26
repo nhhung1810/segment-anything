@@ -148,10 +148,10 @@ class FLARE22(Dataset):
         make_directory(self.cache_path)
         self.dataset = []
 
+        self.input_size = None
+        self.original_size = None
+
     def preload(self, strict=False):
-        """Efficient caching and broadcast cache into pair of embedding-mask"""
-        assert len(self.dataset) > 0, "Empty dataset"
-        # All data, sometime it has invalid mask for a target -> discard it
         for data in tqdm(
             self.file.data, desc="Preload data to RAM", total=len(self.file.data)
         ):
@@ -183,7 +183,7 @@ class FLARE22(Dataset):
             )
             if os.path.exists(cache_path):
                 continue
-            _ = make_directory(cache_path)
+            _ = make_directory(cache_path, is_file=True)
 
             # If don't have the data dict for this img -> create it
             masks = load_file_npz(data["mask_path"])
@@ -218,10 +218,10 @@ class FLARE22(Dataset):
         _emb = pick(data_dict, ["img_emb", "original_size", "input_size", "n_masks"])
         _masks = omit(data_dict, ["img_emb", "original_size", "input_size", "n_masks"])
 
-        if not self.input_size:
+        if self.input_size is None:
             self.input_size = _emb["input_size"]
-        if not self.original_size:
-            self.original_size = _emb["input_size"]
+        if self.original_size is None:
+            self.original_size = _emb["original_size"]
         self._assert_equal(_emb)
 
         # Append into dataset
@@ -239,10 +239,10 @@ class FLARE22(Dataset):
 
         assert (
             self.original_size[0] == d["original_size"][0]
-        ), f"Inconsistent Original size: stored {self.input_size} but got {d['original_size']}"
+        ), f"Inconsistent Original size: stored {self.original_size} but got {d['original_size']}"
         assert (
             self.original_size[1] == d["original_size"][1]
-        ), f"Inconsistent Original size: stored {self.input_size} but got {d['original_size']}"
+        ), f"Inconsistent Original size: stored {self.original_size} but got {d['original_size']}"
         pass
 
     def self_check(self):
@@ -283,7 +283,9 @@ class FLARE22(Dataset):
         return len(self.dataset)
 
     def get_size(self):
-        return self.input_size, self.original_size
+        input_size = (self.input_size[0], self.input_size[1])
+        original_size = (self.original_size[0], self.original_size[1])
+        return input_size, original_size
 
 
 def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> Sam:
@@ -293,8 +295,9 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 
 if __name__ == "__main__":
     sam = load_model()
+    sam.to('cuda:0')
     FLARE22.LIMIT = 20
-    dataset = FLARE22(is_debug=False, is_save_gpu=False)
+    dataset = FLARE22(is_debug=False, pre_trained_sam=sam)
     dataset.preprocess()
     print(len(dataset))
     loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)

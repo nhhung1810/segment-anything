@@ -139,7 +139,10 @@ def summary(model, file=sys.stdout):
     return count
 
 
-def extract_non_image_encoder(model_path: str, model_type: str, save_path: str):
+def extract_non_image_encoder(model_path: str, save_path: str, model_type: str = 'vit_b'):
+    if isinstance(torch.load(model_path), Sam):
+        torch.save(torch.load(model_path).state_dict(), model_path)
+        pass
     model: Sam = sam_model_registry[model_type](checkpoint=model_path)
     state_dict = deepcopy(model.state_dict())
     for key in list(state_dict.keys()):
@@ -147,8 +150,11 @@ def extract_non_image_encoder(model_path: str, model_type: str, save_path: str):
             continue
         del state_dict[key]
     torch.save(state_dict, save_path)
+    pass
 
 
 if __name__ == "__main__":
-
+    files = list(glob.glob("./runs/sam_simple_obj_train-230426-095207/*pt"))
+    for file in files:
+        extract_non_image_encoder(file, file)
     pass

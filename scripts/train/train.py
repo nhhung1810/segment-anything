@@ -50,11 +50,11 @@ def config():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # NOTE: the effective batch-size will = batch_size * gradient_accumulation_step
-    batch_size = 2
+    batch_size = 32
     logdir = f"runs/{NAME}-{TIME}"
     resume_iteration = None
     n_epochs = 100
-    save_epoch = 1
+    save_epoch = 20
 
     # NOTE
     gradient_accumulation_step = 1
@@ -69,8 +69,8 @@ def config():
     # validation_length = sequence_length
 
     # Optim params
-    learning_rate = 6e-4
-    learning_rate_decay_steps = 20 * gradient_accumulation_step
+    learning_rate = 6e-6
+    learning_rate_decay_steps = 10 * gradient_accumulation_step
     learning_rate_decay_rate = 0.98
     clip_gradient_norm = 3
 
@@ -80,9 +80,9 @@ def config():
 
 @ex.capture
 def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
-    dataset = FLARE22(is_debug=True, device=device)
+    dataset = FLARE22(is_debug=False, device=device)
     dataset.preprocess()
-    dataset.preload(strict=True)
+    dataset.preload(strict=False)
     dataset.self_check()
     loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
     return dataset, loader
@@ -202,6 +202,7 @@ def train(
                 optimizer.zero_grad()
 
             writer.add_scalar("train/loss", loss.item(), global_step=idx)
+            writer.add_scalar("train/learning_rate", scheduler.get_last_lr()[0], global_step=idx)
             pass
 
         # End 1 epoch
