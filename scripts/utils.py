@@ -48,7 +48,7 @@ def make_directory(path:str, is_file : bool = False):
     if is_file:
         return make_nested_dir(os.path.dirname(path))
     
-    return make_directory(path)
+    return make_nested_dir(path)
 
 
 GROUP1 = "FLARE22_Tr_0001_0000_abdomen-soft tissues_abdomen-liver"

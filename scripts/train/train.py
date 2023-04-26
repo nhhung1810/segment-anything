@@ -80,7 +80,7 @@ def config():
 
 @ex.capture
 def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
-    dataset = FLARE22(is_debug=True, is_save_gpu=False, device=device)
+    dataset = FLARE22(is_debug=True, device=device)
     dataset.preprocess()
     dataset.preload(strict=True)
     dataset.self_check()
