@@ -115,7 +115,7 @@ def load_model(
 
 
 if __name__ == "__main__":
-    CHECKPOINT_DIR = "./runs/sam_simple_obj_train-230425-214245"
+    CHECKPOINT_DIR = "./runs/all/sam_simple_obj_train-230425-214245"
     model_list = [
         dict(model_name="pretrained", model_path=None),
         dict(model_name="20", model_path=f"{CHECKPOINT_DIR}/model-20.pt"),

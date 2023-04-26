@@ -5,8 +5,6 @@
 @Author : nhhung1810
 @File   : train_orig.py
 
-NOTE:
-This is a refactored version of models/ARMN/train.py.
 """
 import os
 import sys
@@ -84,9 +82,10 @@ def config():
 def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
     dataset = FLARE22(is_debug=True, is_save_gpu=False, device=device)
     dataset.preprocess()
+    dataset.preload(strict=True)
     dataset.self_check()
     loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
-    return loader
+    return dataset, loader
 
 
 @ex.capture
@@ -157,10 +156,11 @@ def train(
     os.makedirs(logdir, exist_ok=True)
     writer = SummaryWriter(logdir)
 
-    loader = make_dataset()
+    dataset, loader = make_dataset()
     sam_train, optimizer, scheduler, loss_fnc = make_model()
 
     assert isinstance(sam_train, SamTrain), ""
+    assert isinstance(dataset, FLARE22), ""
     assert isinstance(optimizer, Optimizer), ""
     assert isinstance(scheduler, StepLR), ""
     assert isinstance(loss_fnc, MultimaskSamLoss), ""
@@ -168,22 +168,21 @@ def train(
     optimizer.zero_grad()
     sam_train.model.train()
     loop = tqdm(range(1, n_epochs + 1), total=n_epochs, desc="Training...")
+    input_size, original_size = dataset.get_size()
     for idx in loop:
         for batch in tqdm(loader, desc=f"Epoch {idx}", leave=False):
             img_emb: Tensor = batch["img_emb"]
             mask: Tensor = batch["mask"]
 
-            input_size = batch["input_size"]
-            original_size = batch["original_size"]
             masks_pred, iou_pred, _ = sam_train.predict_torch(
                 image_emb=img_emb,
-                input_size=(input_size[0, 0], input_size[0, 1]),
-                original_size=(original_size[0, 0], original_size[0, 1]),
+                input_size=input_size,
+                original_size=original_size,
                 multimask_output=True,
                 return_logits=True,
             )
 
-            # Make 3 mask for 3 mult-mask of model
+            # Make 3 mask for 3 multi-mask of model
             mask = mask.unsqueeze(1).repeat_interleave(3, dim=1).type(torch.int64)
 
             loss = loss_fnc.forward(
@@ -199,14 +198,16 @@ def train(
             # This will update the gradient at once
             if idx % gradient_accumulation_step == 0:
                 optimizer.step()
-                scheduler.step()
                 # NOTE: clear the gradient
                 optimizer.zero_grad()
 
             writer.add_scalar("train/loss", loss.item(), global_step=idx)
             pass
 
-        # End 1 batch
+        # End 1 epoch
+        # LR-scheduler run by epoch
+        scheduler.step()
+
         if idx % save_epoch == 0:
             model_path = os.path.join(logdir, f"model-{idx}.pt")
             checkpoint(sam_train.model, device, model_path)

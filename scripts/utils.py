@@ -1,5 +1,6 @@
 from copy import deepcopy
 import itertools
+import os
 import sys
 from functools import reduce
 from typing import Dict, List
@@ -23,18 +24,31 @@ def resize(im: np.ndarray, target_size=[256, 256]):
     [w, h] = target_size
     return T.Resize(size=(w, h))(_im)
 
-
-def make_nested_dir(directory: str) -> str:
-    """Make nested Directory
+def make_directory(path:str, is_file : bool = False):
+    """Make nest directory from path.
 
     Args:
-        directory (str): Path to directory
+        path (str): target path
+        is_file (bool, optional): if True, omit the file 
+            component and make directory. Defaults to False.
+    """    
 
-    Returns:
-        str: Path to that directory
-    """
-    Path(directory).mkdir(parents=True, exist_ok=True)
-    return directory
+    def make_nested_dir(directory: str) -> str:
+        """Make nested Directory
+
+        Args:
+            directory (str): Path to directory
+
+        Returns:
+            str: Path to that directory
+        """
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        return directory
+    
+    if is_file:
+        return make_nested_dir(os.path.dirname(path))
+    
+    return make_directory(path)
 
 
 GROUP1 = "FLARE22_Tr_0001_0000_abdomen-soft tissues_abdomen-liver"
