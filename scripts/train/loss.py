@@ -177,7 +177,7 @@ class IoULoss(nn.Module):
         target = target.view(target.shape[0], -1)
 
         intersection = (input * target).sum(dim=1)
-        dice = (2.0 * intersection + smooth) / (
+        dice = (intersection + smooth) / (
             input.sum(dim=1) + target.sum(dim=1) - intersection + smooth
         )
         dice = 1 - dice

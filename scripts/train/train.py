@@ -99,6 +99,7 @@ def make_model(
     focal_gamma,
     focal_alpha,
 ) -> Tuple[SamTrain, Optimizer, StepLR, int]:
+    
     def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> Sam:
         sam: Sam = sam_model_registry[checkpoint_type](checkpoint=checkpoint)
         return sam
