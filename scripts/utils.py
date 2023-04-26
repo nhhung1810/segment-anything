@@ -1,3 +1,4 @@
+from copy import deepcopy
 import itertools
 import sys
 from functools import reduce
@@ -9,6 +10,9 @@ from pathlib import Path
 from torch.nn.modules.module import _addindent
 import torchvision.transforms as T
 import torch
+
+from segment_anything.modeling.sam import Sam
+from segment_anything.build_sam import sam_model_registry
 
 
 def resize(im: np.ndarray, target_size=[256, 256]):
@@ -67,13 +71,6 @@ def generate_grid(w, h, est_n_point=16):
     return samples, labels
 
 
-def mask_out(mask, xmin, xmax, ymin, ymax, to_value):
-    _mask = np.ones(mask.shape) == 1.0
-    _mask[xmin:xmax, ymin:ymax] = False
-    mask[_mask] = to_value
-    return mask
-
-
 def pick(d: Dict[object, object], keys: List[object]):
     return {k: v for k, v in d.items() if k in keys}
 
@@ -126,3 +123,18 @@ def summary(model, file=sys.stdout):
         file.flush()
 
     return count
+
+
+def extract_non_image_encoder(model_path: str, model_type: str, save_path: str):
+    model: Sam = sam_model_registry[model_type](checkpoint=model_path)
+    state_dict = deepcopy(model.state_dict())
+    for key in list(state_dict.keys()):
+        if not key.startswith("image_encoder."):
+            continue
+        del state_dict[key]
+    torch.save(state_dict, save_path)
+
+
+if __name__ == "__main__":
+
+    pass

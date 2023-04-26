@@ -11,9 +11,10 @@ This is a refactored version of models/ARMN/train.py.
 import os
 import sys
 from datetime import datetime
+import loguru
 from loguru import logger
 from typing import Tuple
-import loguru
+from copy import deepcopy
 from sacred import Experiment
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
@@ -51,11 +52,11 @@ def config():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # NOTE: the effective batch-size will = batch_size * gradient_accumulation_step
-    batch_size = 32
+    batch_size = 2
     logdir = f"runs/{NAME}-{TIME}"
     resume_iteration = None
     n_epochs = 100
-    save_epoch = 20
+    save_epoch = 1
 
     # NOTE
     gradient_accumulation_step = 1
@@ -71,7 +72,7 @@ def config():
 
     # Optim params
     learning_rate = 6e-4
-    learning_rate_decay_steps = 10000 * gradient_accumulation_step
+    learning_rate_decay_steps = 20 * gradient_accumulation_step
     learning_rate_decay_rate = 0.98
     clip_gradient_norm = 3
 
@@ -81,7 +82,7 @@ def config():
 
 @ex.capture
 def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
-    dataset = FLARE22(is_debug=False, is_save_gpu=False, device=device)
+    dataset = FLARE22(is_debug=True, is_save_gpu=False, device=device)
     dataset.preprocess()
     dataset.self_check()
     loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
@@ -129,6 +130,20 @@ def make_model(
     return sam_train, optimizer, scheduler, loss_fnc
 
 
+def checkpoint(model: Sam, device: str, save_path: str):
+    model.to("cpu")
+    state_dict = deepcopy(model.state_dict())
+    # Remove image_encoder for lighter weight
+    for key in list(state_dict.keys()):
+        if not key.startswith("image_encoder."):
+            continue
+        del state_dict[key]
+    torch.save(state_dict, save_path)
+    model.to(device)
+
+    pass
+
+
 @ex.automain
 def train(
     logdir,
@@ -155,10 +170,9 @@ def train(
     loop = tqdm(range(1, n_epochs + 1), total=n_epochs, desc="Training...")
     for idx in loop:
         for batch in tqdm(loader, desc=f"Epoch {idx}", leave=False):
-            
             img_emb: Tensor = batch["img_emb"]
             mask: Tensor = batch["mask"]
-            
+
             input_size = batch["input_size"]
             original_size = batch["original_size"]
             masks_pred, iou_pred, _ = sam_train.predict_torch(
@@ -189,15 +203,14 @@ def train(
                 # NOTE: clear the gradient
                 optimizer.zero_grad()
 
-
             writer.add_scalar("train/loss", loss.item(), global_step=idx)
             pass
 
         # End 1 batch
         if idx % save_epoch == 0:
-            sam_train.model.to('cpu')
             model_path = os.path.join(logdir, f"model-{idx}.pt")
-            torch.save(sam_train.model.state_dict(), model_path)
-            sam_train.model.to(device)
+            checkpoint(sam_train.model, device, model_path)
+            # sam_train.model.to("cpu")
+            # torch.save(sam_train.model.state_dict(), model_path)
+            # sam_train.model.to(device)
             pass
-
