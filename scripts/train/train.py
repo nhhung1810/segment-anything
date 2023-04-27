@@ -81,7 +81,7 @@ def config():
 @ex.capture
 def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
     # Save GPU by host the dataset on cpu only
-    dataset = FLARE22(is_debug=False, device="cpu")
+    dataset = FLARE22(is_debug=False, device=device)
     dataset.preprocess()
     dataset.preload(strict=False)
     dataset.self_check()
@@ -172,8 +172,8 @@ def train(
     input_size, original_size = dataset.get_size()
     for idx in loop:
         for batch in tqdm(loader, desc=f"Epoch {idx}", leave=False):
-            batch["img_emb"] = batch["img_emb"].to(device)
-            batch["mask"] = batch["mask"].to(device)
+            # batch["img_emb"] = batch["img_emb"].to(device)
+            # batch["mask"] = batch["mask"].to(device)
 
             img_emb: Tensor = batch["img_emb"]
             mask: Tensor = batch["mask"]
@@ -210,8 +210,8 @@ def train(
                 "train/learning_rate", scheduler.get_last_lr()[0], global_step=idx
             )
 
-            batch["img_emb"] = batch["img_emb"].to("cpu")
-            batch["mask"] = batch["mask"].to("cpu")
+            # batch["img_emb"] = batch["img_emb"].to("cpu")
+            # batch["mask"] = batch["mask"].to("cpu")
             torch.cuda.empty_cache()
 
             pass
