@@ -206,7 +206,7 @@ def train(
                 # NOTE: clear the gradient
                 optimizer.zero_grad()
 
-            one_batch_losses.append(loss.detach().cpu().numpy()[0])
+            one_batch_losses.append(loss.detach().cpu().numpy())
             pass
 
         # Loss by batch
