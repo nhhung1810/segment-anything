@@ -219,6 +219,14 @@ def train(
         # End 1 epoch
         # LR-scheduler run by epoch
         scheduler.step()
+        pass
+
+        if idx % gradient_accumulation_step != 0:
+            # Run backward if there some gradient left
+            optimizer.step()
+            optimizer.zero_grad()
+            pass
+
 
         if idx % save_epoch == 0:
             model_path = os.path.join(logdir, f"model-{idx}.pt")
