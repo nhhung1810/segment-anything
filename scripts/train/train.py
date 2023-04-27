@@ -13,6 +13,7 @@ import loguru
 from loguru import logger
 from typing import Tuple
 from copy import deepcopy
+import numpy as np
 from sacred import Experiment
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
@@ -170,11 +171,11 @@ def train(
     sam_train.model.train()
     loop = tqdm(range(1, n_epochs + 1), total=n_epochs, desc="Training...")
     input_size, original_size = dataset.get_size()
-    for idx in loop:
-        for batch in tqdm(loader, desc=f"Epoch {idx}", leave=False):
-            # batch["img_emb"] = batch["img_emb"].to(device)
-            # batch["mask"] = batch["mask"].to(device)
-
+    for batch_idx in loop:
+        one_batch_losses = []
+        for idx, batch in tqdm(
+            enumerate(loader), desc=f"Epoch {batch_idx}", leave=False
+        ):
             img_emb: Tensor = batch["img_emb"]
             mask: Tensor = batch["mask"]
 
@@ -205,33 +206,31 @@ def train(
                 # NOTE: clear the gradient
                 optimizer.zero_grad()
 
-            writer.add_scalar("train/loss", loss.item(), global_step=idx)
-            writer.add_scalar(
-                "train/learning_rate", scheduler.get_last_lr()[0], global_step=idx
-            )
-
-            # batch["img_emb"] = batch["img_emb"].to("cpu")
-            # batch["mask"] = batch["mask"].to("cpu")
-            torch.cuda.empty_cache()
-
+            one_batch_losses.append(loss.detach().numpy()[0])
             pass
+
+        # Loss by batch
+        writer.add_scalar(
+            "train/loss", np.array(one_batch_losses).mean(), global_step=batch_idx
+        )
+        writer.add_scalar(
+            "train/learning_rate", scheduler.get_last_lr()[0], global_step=batch_idx
+        )
 
         # End 1 epoch
         # LR-scheduler run by epoch
         scheduler.step()
+
         pass
 
+        # The idx from the above loop will be leak out of scope, this is python feat.
         if idx % gradient_accumulation_step != 0:
             # Run backward if there some gradient left
             optimizer.step()
             optimizer.zero_grad()
             pass
 
-
-        if idx % save_epoch == 0:
-            model_path = os.path.join(logdir, f"model-{idx}.pt")
+        if batch_idx % save_epoch == 0:
+            model_path = os.path.join(logdir, f"model-{batch_idx}.pt")
             checkpoint(sam_train.model, device, model_path)
-            # sam_train.model.to("cpu")
-            # torch.save(sam_train.model.state_dict(), model_path)
-            # sam_train.model.to(device)
             pass
