@@ -151,6 +151,29 @@ class DiceLoss(nn.Module):
         if self.reduction == "mean":
             return dice.mean()
 
+    def run_on_batch(self, input: Tensor, target: Tensor, smooth=1):
+        _reduction = self.reduction
+
+        self.reduction = "none"
+        batch_size, n, h, w = input.shape
+        input = input.contiguous().view(batch_size * n, h, w)
+        target = target.contiguous().view(batch_size * n, h, w)
+
+        loss = self.forward(input, target, smooth)
+        loss = loss.contiguous().view(batch_size, n)
+
+        if self.reduction == "none":
+            return loss
+
+        if self.reduction == "sum":
+            return loss.sum()
+
+        if self.reduction == "mean":
+            return loss.mean()
+
+        self.reduction = _reduction
+        return loss
+
 
 class IoULoss(nn.Module):
     def __init__(self, activation: nn.Sigmoid = None, reduction: str = "none"):
@@ -190,6 +213,29 @@ class IoULoss(nn.Module):
 
         if self.reduction == "mean":
             return dice.mean()
+
+    def run_on_batch(self, input: Tensor, target: Tensor, smooth=1):
+        _reduction = self.reduction
+
+        self.reduction = "none"
+        batch_size, n, h, w = input.shape
+        input = input.contiguous().view(batch_size * n, h, w)
+        target = target.contiguous().view(batch_size * n, h, w)
+
+        loss = self.forward(input, target, smooth)
+        loss = loss.contiguous().view(batch_size, n)
+
+        if self.reduction == "none":
+            return loss
+
+        if self.reduction == "sum":
+            return loss.sum()
+
+        if self.reduction == "mean":
+            return loss.mean()
+
+        self.reduction = _reduction
+        return loss
 
 
 class MeanSquareError(nn.Module):

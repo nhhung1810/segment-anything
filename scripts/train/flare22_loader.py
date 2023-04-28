@@ -96,10 +96,10 @@ class FLAREElement:
 class SinglePointObjDetectFile:
     def __init__(
         self,
-        train_metadata_path: str = TRAIN_METADATA,
+        metadata_path: str = TRAIN_METADATA,
         dataset_root: str = DATASET_ROOT,
     ) -> None:
-        with open(train_metadata_path) as out:
+        with open(metadata_path) as out:
             self.metadata = json.load(out)
         self.data: List[FLAREElement] = []
         self.dataset_root = dataset_root
@@ -124,9 +124,9 @@ class FLARE22(Dataset):
     def __init__(
         self,
         pre_trained_sam: Sam = None,
-        train_metadata_path: str = TRAIN_METADATA,
+        metadata_path: str = TRAIN_METADATA,
         dataset_root: str = DATASET_ROOT,
-        cache_name: str = "single_point_object_detect",
+        cache_name: str = "simple-dataset/train",
         is_debug: bool = False,
         device: str = "cpu",
     ) -> None:
@@ -140,7 +140,7 @@ class FLARE22(Dataset):
         self.dataset_root = dataset_root
 
         self.file = SinglePointObjDetectFile(
-            train_metadata_path=train_metadata_path, dataset_root=dataset_root
+            metadata_path=metadata_path, dataset_root=dataset_root
         )
         if is_debug:
             self.file.data = self.file.data[: self.LIMIT]
@@ -295,7 +295,7 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 
 if __name__ == "__main__":
     sam = load_model()
-    sam.to('cuda:0')
+    # sam.to("cuda:0")
     FLARE22.LIMIT = 20
     dataset = FLARE22(is_debug=False, pre_trained_sam=sam)
     dataset.preprocess()

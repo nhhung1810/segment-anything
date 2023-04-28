@@ -25,6 +25,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import torch
+from scripts.train.eval import evaluate
 
 # Internal
 from scripts.train.flare22_loader import FLARE22
@@ -34,6 +35,7 @@ from scripts.utils import summary
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 
+IS_DEBUG = True
 NAME = "sam-fix-iou"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
@@ -56,6 +58,7 @@ def config():
     resume_iteration = None
     n_epochs = 100
     save_epoch = 20
+    evaluate_epoch = 20
 
     # NOTE
     gradient_accumulation_step = 1
@@ -67,7 +70,6 @@ def config():
     # sequence_length = 327680
     # model_complexity = 16
     # model_complexity_lstm = 16
-    # validation_length = sequence_length
 
     # Optim params
     learning_rate = 6e-6
@@ -82,11 +84,14 @@ def config():
 @ex.capture
 def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
     # Save GPU by host the dataset on cpu only
-    dataset = FLARE22(is_debug=False, device=device)
+    dataset = FLARE22(is_debug=IS_DEBUG, device=device)
     dataset.preprocess()
     dataset.preload(strict=False)
     dataset.self_check()
     loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
+
+    # Make sure that the evaluation dataset also work
+    FLARE22(metadata_path="")
     return dataset, loader
 
 
@@ -145,12 +150,37 @@ def checkpoint(model: Sam, device: str, save_path: str):
     pass
 
 
+def offload_gpu(dataset: FLARE22):
+    _device = dataset.device
+    dataset.device = "cpu"
+    _loader = DataLoader(dataset=dataset, batch_size=32, drop_last=False)
+    for _ in tqdm(_loader, desc="Off-loading GPU before validation..."):
+        pass
+    # Give back the device
+    dataset.device = _device
+    torch.cuda.empty_cache()
+    pass
+
+
+@ex.capture
+def run_evaluate(sam_train: SamTrain, device: str, batch_size: int) -> dict:
+    dataset = FLARE22(
+        metadata_path="dataset/FLARE22-version1/val_metadata.json",
+        cache_name="simple-dataset/validation",
+        is_debug=IS_DEBUG,
+        device=device,
+    )
+    dataset.preload()
+    return evaluate(sam_train, dataset, batch_size=batch_size // 2)
+
+
 @ex.automain
 def train(
     logdir,
     device,
     n_epochs,
     save_epoch,
+    evaluate_epoch,
     clip_gradient_norm,
     gradient_accumulation_step,
 ):
@@ -158,11 +188,11 @@ def train(
     os.makedirs(logdir, exist_ok=True)
     writer = SummaryWriter(logdir)
 
-    dataset, loader = make_dataset()
+    train_dataset, loader = make_dataset()
     sam_train, optimizer, scheduler, loss_fnc = make_model()
 
     assert isinstance(sam_train, SamTrain), ""
-    assert isinstance(dataset, FLARE22), ""
+    assert isinstance(train_dataset, FLARE22), ""
     assert isinstance(optimizer, Optimizer), ""
     assert isinstance(scheduler, StepLR), ""
     assert isinstance(loss_fnc, MultimaskSamLoss), ""
@@ -170,7 +200,7 @@ def train(
     optimizer.zero_grad()
     sam_train.model.train()
     loop = tqdm(range(1, n_epochs + 1), total=n_epochs, desc="Training...")
-    input_size, original_size = dataset.get_size()
+    input_size, original_size = train_dataset.get_size()
     for batch_idx in loop:
         one_batch_losses = []
         for idx, batch in tqdm(
@@ -196,6 +226,8 @@ def train(
                 multi_mask_target=mask,
             )
 
+            # Before doing anything, we have to record the actual loss
+            one_batch_losses.append(loss.detach().cpu().numpy())
             # Normalize loss
             loss: Tensor = loss / gradient_accumulation_step
             loss.backward()
@@ -206,7 +238,6 @@ def train(
                 # NOTE: clear the gradient
                 optimizer.zero_grad()
 
-            one_batch_losses.append(loss.detach().cpu().numpy())
             pass
 
         # Loss by batch
@@ -220,7 +251,6 @@ def train(
         # End 1 epoch
         # LR-scheduler run by epoch
         scheduler.step()
-
         pass
 
         # The idx from the above loop will be leak out of scope, this is python feat.
@@ -228,6 +258,13 @@ def train(
             # Run backward if there some gradient left
             optimizer.step()
             optimizer.zero_grad()
+            pass
+
+        if batch_idx % evaluate_epoch == 0:
+            offload_gpu(dataset=train_dataset)
+            metrics: dict = run_evaluate(sam_train=sam_train)
+            for k, v in metrics.items():
+                writer.add_scalar(f"validation/{k}", v, global_step=batch_idx)
             pass
 
         if batch_idx % save_epoch == 0:

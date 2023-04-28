@@ -16,7 +16,7 @@ class BBoxProperty:
 
 def mask_out(mask, bbox: BBoxProperty):
     _mask = np.ones(mask.shape) == 1.0
-    _mask[bbox.xmin : bbox.xmax, bbox, bbox.ymin : bbox.ymax] = False
+    _mask[bbox.xmin : bbox.xmax, bbox.ymin : bbox.ymax] = False
     mask[_mask] = bbox.to_value
     return mask
 
@@ -76,7 +76,7 @@ class PointUtils:
 
         row, col = self.positive_center_point(mask, class_number)
         positive = self.positive_random_point(mask, class_number, [row, col])
-        negative = self.negative_random(mask)
+        negative = self.negative_random_outside(mask)
 
         # Make the col/row and label
         coors = np.array([[col, row], *positive, *negative])
