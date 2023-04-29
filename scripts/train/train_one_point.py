@@ -3,7 +3,7 @@
 """
 @Time   : 2022-05-12
 @Author : nhhung1810
-@File   : train.py
+@File   : train_one_point.py
 
 """
 import gc
@@ -26,10 +26,11 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import torch
+from scripts.datasets.constant import TRAIN_METADATA, VAL_METADATA
 from scripts.train.eval import evaluate
 
 # Internal
-from scripts.datasets.flare22_loader import FLARE22
+from scripts.datasets.flare22_one_point import FLARE22_One_Point
 from scripts.train.loss import MultimaskSamLoss
 from scripts.train.sam_train import SamTrain
 from scripts.utils import summary
@@ -37,7 +38,7 @@ from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 
 IS_DEBUG = False
-NAME = "sam-fix-iou"
+NAME = "sam-one-point"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -83,18 +84,23 @@ def config():
 
 
 @ex.capture
-def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
+def make_dataset(device, batch_size) -> Tuple[FLARE22_One_Point, DataLoader]:
     # Save GPU by host the dataset on cpu only
-    dataset = FLARE22(is_debug=IS_DEBUG, device=device)
+    dataset = FLARE22_One_Point(
+        metadata_path=TRAIN_METADATA,
+        cache_name=FLARE22_One_Point.TRAIN_CACHE_NAME,
+        is_debug=IS_DEBUG,
+        device=device,
+    )
     dataset.preprocess()
     dataset.preload(strict=False)
     dataset.self_check()
     loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
 
     # Make sure that the evaluation dataset also work
-    _ = FLARE22(
-        metadata_path="dataset/FLARE22-version1/val_metadata.json",
-        cache_name="simple-dataset/validation",
+    _ = FLARE22_One_Point(
+        metadata_path=VAL_METADATA,
+        cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device="cpu",
     ).preprocess()
@@ -120,7 +126,7 @@ def make_model(
     model.to(device=device)
 
     if resume_iteration is None:
-        logger.warning("Fresh-new model is initialized")
+        logger.warning("Initialize from pre-train")
         optimizer = torch.optim.Adam(model.parameters(), learning_rate)
         resume_iteration = 0
 
@@ -155,25 +161,11 @@ def checkpoint(model: Sam, device: str, save_path: str):
 
     pass
 
-
-def offload_gpu(dataset: FLARE22):
-    _device = dataset.device
-    dataset.device = "cpu"
-    _loader = DataLoader(dataset=dataset, batch_size=32, drop_last=False)
-    for _ in tqdm(_loader, desc="Off-loading GPU before validation..."):
-        pass
-    # Give back the device
-    dataset.device = _device
-    torch.cuda.empty_cache()
-    _ = gc.collect()
-    pass
-
-
 @ex.capture
 def run_evaluate(sam_train: SamTrain, device: str, batch_size: int) -> dict:
-    dataset = FLARE22(
-        metadata_path="dataset/FLARE22-version1/val_metadata.json",
-        cache_name="simple-dataset/validation",
+    dataset = FLARE22_One_Point(
+        metadata_path=VAL_METADATA,
+        cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device=device,
     )
@@ -199,7 +191,7 @@ def train(
     sam_train, optimizer, scheduler, loss_fnc = make_model()
 
     assert isinstance(sam_train, SamTrain), ""
-    assert isinstance(train_dataset, FLARE22), ""
+    assert isinstance(train_dataset, FLARE22_One_Point), ""
     assert isinstance(optimizer, Optimizer), ""
     assert isinstance(scheduler, StepLR), ""
     assert isinstance(loss_fnc, MultimaskSamLoss), ""
@@ -215,11 +207,15 @@ def train(
         ):
             img_emb: Tensor = batch["img_emb"]
             mask: Tensor = batch["mask"]
+            coors: Tensor = batch["coors"]
+            labels: Tensor = batch["labels"]
 
             masks_pred, iou_pred, _ = sam_train.predict_torch(
                 image_emb=img_emb,
                 input_size=input_size,
                 original_size=original_size,
+                point_coords=coors,
+                point_labels=labels,
                 multimask_output=True,
                 return_logits=True,
             )

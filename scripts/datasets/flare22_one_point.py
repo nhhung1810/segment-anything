@@ -4,9 +4,15 @@ from tqdm import tqdm
 import numpy as np
 import os
 import torch
-from enum import Enum
+from scripts.datasets.constant import (
+    DATASET_ROOT,
+    IMAGE_TYPE,
+    FLARE22_LABEL_ENUM,
+    TRAIN_METADATA,
+)
 from typing import Dict, List, Optional
 from torch.utils.data import Dataset, DataLoader
+from scripts.point_utils import PointUtils
 from scripts.train.sam_train import SamTrain
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
@@ -17,35 +23,6 @@ from scripts.utils import (
     omit,
     pick,
 )
-
-# Respective to root
-DATASET_ROOT = "./dataset/FLARE22-version1/"
-TRAIN_PATH = "./dataset/FLARE22-version1/TrainImageProcessed"
-TRAIN_MASK = "./dataset/FLARE22-version1/TrainMask"
-TRAIN_METADATA = "./dataset/FLARE22-version1/train_metadata.json"
-
-
-class FLARE22_LABEL_ENUM(Enum):
-    BACK_GROUND = 0
-    LIVER = 1
-    RIGHT_KIDNEY = 2
-    SPLEEN = 3
-    PANCREAS = 4
-    AORTA = 5
-    IVC = 6  # Inferior Vena Cava
-    RAG = 7  # Right Adrenal Gland,
-    LAG = 8  # Left Adrenal Gland,
-    GALLBLADDER = 9
-    ESOPHAGUS = 10
-    STOMACH = 11
-    DUODENUM = 12
-    LEFT_KIDNEY = 13
-
-
-class IMAGE_TYPE(Enum):
-    ABDOMEN_SOFT_TISSUES_ABDOMEN_LIVER = "abdomen-soft tissues_abdomen-liver"
-    CHEST_LUNGS_CHEST_MEDIASTINUM = "chest-lungs_chest-mediastinum"
-    SPINE_BONE = "spine-bone"
 
 
 class FLAREElement:
@@ -93,7 +70,7 @@ class FLAREElement:
         pass
 
 
-class SinglePointObjDetectFile:
+class FileLoader:
     def __init__(
         self,
         metadata_path: str = TRAIN_METADATA,
@@ -117,16 +94,18 @@ class SinglePointObjDetectFile:
         pass
 
 
-class FLARE22(Dataset):
+class FLARE22_One_Point(Dataset):
     # FOR DEBUG
     LIMIT = 20
+    TRAIN_CACHE_NAME = "flare22-one-point/train"
+    VAL_CACHE_NAME = "flare22-dataset/validation"
 
     def __init__(
         self,
         pre_trained_sam: Sam = None,
         metadata_path: str = TRAIN_METADATA,
         dataset_root: str = DATASET_ROOT,
-        cache_name: str = "simple-dataset/train",
+        cache_name: str = TRAIN_CACHE_NAME,
         is_debug: bool = False,
         device: str = "cpu",
     ) -> None:
@@ -139,9 +118,7 @@ class FLARE22(Dataset):
             self.train_sam = SamTrain(self.pre_trained_sam)
         self.dataset_root = dataset_root
 
-        self.file = SinglePointObjDetectFile(
-            metadata_path=metadata_path, dataset_root=dataset_root
-        )
+        self.file = FileLoader(metadata_path=metadata_path, dataset_root=dataset_root)
         if is_debug:
             self.file.data = self.file.data[: self.LIMIT]
         self.cache_path = os.path.join(self.dataset_root, cache_name)
@@ -151,7 +128,38 @@ class FLARE22(Dataset):
         self.input_size = None
         self.original_size = None
 
-    def preload(self, strict=False):
+    def __getitem__(self, index) -> Dict:
+        data = self.dataset[index]
+        return self.format_batch(data)
+
+    def format_batch(self, data: dict):
+        """Format into batch-compatible data
+
+        Args:
+            data (dict): Data from preprocessing step
+
+        Returns:
+            Dict: batch-compatible data for dataloader
+        """
+
+        # Remove the batch element
+        img_emb = data["img_emb"][0]
+        mask = data["mask"]
+
+        return dict(
+            img_emb=img_emb.to(self.device),
+            mask=mask.to(self.device),
+        )
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def get_size(self):
+        input_size = (self.input_size[0], self.input_size[1])
+        original_size = (self.original_size[0], self.original_size[1])
+        return input_size, original_size
+
+    def preload(self):
         for data in tqdm(
             self.file.data, desc="Preload data to RAM", total=len(self.file.data)
         ):
@@ -163,9 +171,6 @@ class FLARE22(Dataset):
                 data_dict = torch.load(cache_path)
                 self.load_data_dict_into_dataset(data_dict)
                 continue
-
-            if strict:
-                raise FileNotFoundError(f"Can not found cache data: {cache_path}")
         pass
 
     def preprocess(self):
@@ -202,12 +207,22 @@ class FLARE22(Dataset):
             }
 
             for _cls_value in np.unique(masks):
-                data_dict[_cls_value] = torch.as_tensor(masks == _cls_value)
+                coors, labels = self.make_one_positive_point(masks, _cls_value)
+                _value = {
+                    "mask": torch.as_tensor(masks == _cls_value),
+                    "coors": coors,
+                    "labels": labels,
+                }
+                data_dict[f"{_cls_value}"] = _value
                 pass
             data_dict["n_masks"] = np.unique(masks).shape[0]
             torch.save(data_dict, cache_path)
-            # self.load_data_dict_into_dataset(data_dict)
         pass
+
+    def make_one_positive_point(self, masks, class_number):
+        p = PointUtils()
+        coors, label = p.one_positive(masks, class_number)
+        return torch.as_tensor(coors), torch.as_tensor(label)
 
     def _is_valid_mask(self, masks):
         """Filter out bad mask"""
@@ -215,21 +230,30 @@ class FLARE22(Dataset):
 
     def load_data_dict_into_dataset(self, data_dict):
         # Separate into emb and mask
-        _emb = pick(data_dict, ["img_emb", "original_size", "input_size", "n_masks"])
+        _emb = pick(data_dict, ["img_emb", "n_masks"])
         _masks = omit(data_dict, ["img_emb", "original_size", "input_size", "n_masks"])
+        _size = pick(data_dict, ["original_size", "input_size"])
 
         if self.input_size is None:
-            self.input_size = _emb["input_size"]
+            self.input_size = _size["input_size"]
         if self.original_size is None:
-            self.original_size = _emb["original_size"]
-        self._assert_equal(_emb)
+            self.original_size = _size["original_size"]
+            pass
+        self._assert_size(_emb)
 
         # Append into dataset
         for _, v in _masks.items():
-            self.dataset.append({**_emb, "mask": v})
+            self.dataset.append(
+                {
+                    **_emb,
+                    "mask": v["mask"],
+                    "coors": v["coors"],
+                    "labels": v["labels"],
+                }
+            )
         pass
 
-    def _assert_equal(self, d):
+    def _assert_size(self, d):
         assert (
             self.input_size[0] == d["input_size"][0]
         ), f"Inconsistent input size: stored {self.input_size} but got {d['input_size']}"
@@ -256,37 +280,6 @@ class FLARE22(Dataset):
             pass
         pass
 
-    def __getitem__(self, index) -> Dict:
-        data = self.dataset[index]
-        return self.format_batch(data)
-
-    def format_batch(self, data: dict):
-        """Format into batch-compatible data
-
-        Args:
-            data (dict): Data from preprocessing step
-
-        Returns:
-            Dict: batch-compatible data for dataloader
-        """
-
-        # Remove the batch element
-        img_emb = data["img_emb"][0]
-        mask = data["mask"]
-
-        return dict(
-            img_emb=img_emb.to(self.device),
-            mask=mask.to(self.device),
-        )
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def get_size(self):
-        input_size = (self.input_size[0], self.input_size[1])
-        original_size = (self.original_size[0], self.original_size[1])
-        return input_size, original_size
-
 
 def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> Sam:
     sam: Sam = sam_model_registry[checkpoint_type](checkpoint=checkpoint)
@@ -294,17 +287,17 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 
 
 if __name__ == "__main__":
-    sam = load_model()
-    # sam.to("cuda:0")
-    FLARE22.LIMIT = 20
-    dataset = FLARE22(is_debug=False, pre_trained_sam=sam)
-    dataset.preprocess()
-    print(len(dataset))
-    loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
-    for batch in loader:
-        for k, v in batch.items():
-            print(f"{k} : {v.shape}")
-            pass
-        break
+    # sam = load_model()
+    # # sam.to("cuda:0")
+    # FLARE22.LIMIT = 20
+    # dataset = FLARE22(is_debug=False, pre_trained_sam=sam)
+    # dataset.preprocess()
+    # print(len(dataset))
+    # loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
+    # for batch in loader:
+    #     for k, v in batch.items():
+    #         print(f"{k} : {v.shape}")
+    #         pass
+    #     break
 
     pass

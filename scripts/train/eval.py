@@ -1,12 +1,16 @@
+from glob import glob
+import json
+import os
 import numpy as np
 from torch import nn
 import torch
-from flare22_loader import FLARE22
+from scripts.datasets.flare22_loader import FLARE22
 from scripts.train.sam_train import SamTrain
 from torch.utils.data import DataLoader
 
 from segment_anything.build_sam import sam_model_registry
 from scripts.train.loss import IoULoss, DiceLoss
+from segment_anything.modeling.sam import Sam
 
 
 def make_metrics(ious: list, dices: list, iou_mses: list, selected_indices):
@@ -34,18 +38,23 @@ def make_metrics(ious: list, dices: list, iou_mses: list, selected_indices):
     max_dice = dices.reshape(-1).max()
     max_mse = iou_mses.reshape(-1).max()
 
+    # Mean of best iou and dice for each triplet mask
+    mean_best_iou = ious.max(axis=1).mean()
+    mean_best_dice = dices.max(axis=1).mean()
 
     return {
-        'iou/min': min_iou,
-        'iou/max': max_iou,
-        'iou/mean': mean_iou,
-        'iou/mean_of_selected': mean_selected_iou,
-        'dice/min': min_dice,
-        'dice/max': max_dice,
-        'dice/mean': mean_dice,
-        'pred_iou_mse/min': min_mse,
-        'pred_iou_mse/max': max_mse,
-        'pred_iou_mse/mean': mean_mse,
+        "iou/min": min_iou,
+        "iou/max": max_iou,
+        "iou/mean": mean_iou,
+        "iou/mean_of_best": mean_best_iou,
+        "iou/mean_of_selected": mean_selected_iou,
+        "dice/min": min_dice,
+        "dice/max": max_dice,
+        "dice/mean": mean_dice,
+        "dice/mean_of_best": mean_best_dice,
+        "pred_iou_mse/min": min_mse,
+        "pred_iou_mse/max": max_mse,
+        "pred_iou_mse/mean": mean_mse,
     }
 
 
@@ -79,7 +88,7 @@ def evaluate(sam_train: SamTrain, dataset: FLARE22, batch_size: int):
         # result.shape = [batch_size, 3]
         iou = iou_fn.run_on_batch(input=mask_pred, target=mask)
         dice = dice_fn.run_on_batch(input=mask_pred, target=mask)
-        
+
         # Invert the loss -> metrics
         iou = 1 - iou
         dice = 1 - dice
@@ -101,20 +110,37 @@ def evaluate(sam_train: SamTrain, dataset: FLARE22, batch_size: int):
 
 
 if __name__ == "__main__":
-    path = "./sam_vit_b_01ec64.pth"
-    model = sam_model_registry["vit_b"](path)
-    model.to('cuda:0')
-    sam_train = SamTrain(sam_model=model)
-    # FLARE22.LIMIT = 20
+    from pprint import PrettyPrinter
+
+    pp = PrettyPrinter(indent=2)
     dataset = FLARE22(
-        pre_trained_sam=sam_train.model,
+        pre_trained_sam=None,
         metadata_path="dataset/FLARE22-version1/val_metadata.json",
         cache_name="simple-dataset/validation",
         is_debug=False,
         device='cuda:0'
     )
-    dataset.preprocess()
-    dataset.preload()
-    metrics = evaluate(sam_train=sam_train, dataset=dataset, batch_size=32)
-    print("🚀 ~ file: eval.py:97 ~ metrics:", metrics)
+    
+    # path = "./sam_vit_b_01ec64.pth"
+    runs_dir = ...
+    save = {}
+    paths = glob(f"{runs_dir}/model-*.pt")
+    model_entries = [
+        {"name": "pretrain", "custom": None},
+        *[{"name": os.path.basename(path), "custom": path} for path in paths]
+    ]
+    for entry in model_entries:
+        model: Sam = sam_model_registry["vit_b"](
+            checkpoint="./sam_vit_b_01ec64.pth", custom=entry['custom']
+            )
+        model.to('cuda:0')
+        sam_train = SamTrain(sam_model=model)
+        dataset.device = model.device
+        dataset.preload()
+        metrics = evaluate(sam_train=sam_train, dataset=dataset, batch_size=32)
+        pp.print(metrics)
+        save[entry['name']] = metrics
+
+    with open("all_metrics.json") as out:
+        json.dump(save, out)
     pass
