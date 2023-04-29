@@ -6,6 +6,7 @@
 @File   : train_orig.py
 
 """
+import gc
 import os
 import sys
 from datetime import datetime
@@ -35,7 +36,7 @@ from scripts.utils import summary
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 
-IS_DEBUG = True
+IS_DEBUG = False
 NAME = "sam-fix-iou"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
@@ -91,7 +92,12 @@ def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
     loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
 
     # Make sure that the evaluation dataset also work
-    FLARE22(metadata_path="")
+    _ = FLARE22(
+        metadata_path="dataset/FLARE22-version1/val_metadata.json",
+        cache_name="simple-dataset/validation",
+        is_debug=IS_DEBUG,
+        device='cpu',
+    ).preprocess()
     return dataset, loader
 
 
@@ -159,6 +165,7 @@ def offload_gpu(dataset: FLARE22):
     # Give back the device
     dataset.device = _device
     torch.cuda.empty_cache()
+    _ = gc.collect()
     pass
 
 
@@ -261,7 +268,7 @@ def train(
             pass
 
         if batch_idx % evaluate_epoch == 0:
-            offload_gpu(dataset=train_dataset)
+            # offload_gpu(dataset=train_dataset)
             metrics: dict = run_evaluate(sam_train=sam_train)
             for k, v in metrics.items():
                 writer.add_scalar(f"validation/{k}", v, global_step=batch_idx)

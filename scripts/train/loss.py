@@ -200,19 +200,21 @@ class IoULoss(nn.Module):
         target = target.view(target.shape[0], -1)
 
         intersection = (input * target).sum(dim=1)
-        dice = (intersection + smooth) / (
+        iou = (intersection + smooth) / (
             input.sum(dim=1) + target.sum(dim=1) - intersection + smooth
         )
-        dice = 1 - dice
+
+        # NOTE: loss need negative number
+        iou = 1 - iou
 
         if self.reduction == "none":
-            return dice
+            return iou
 
         if self.reduction == "sum":
-            return dice.sum()
+            return iou.sum()
 
         if self.reduction == "mean":
-            return dice.mean()
+            return iou.mean()
 
     def run_on_batch(self, input: Tensor, target: Tensor, smooth=1):
         _reduction = self.reduction
@@ -289,6 +291,7 @@ class SamLoss(nn.Module):
         iou_target = self.iou(mask_pred, mask_target)
         iou_mse_loss = self.mse(iou_pred, iou_target)
 
+        # Dice is a positive
         final_loss = focal_loss * 20 + dice_loss + iou_mse_loss
         return final_loss
 

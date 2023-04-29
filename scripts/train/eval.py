@@ -79,6 +79,10 @@ def evaluate(sam_train: SamTrain, dataset: FLARE22, batch_size: int):
         # result.shape = [batch_size, 3]
         iou = iou_fn.run_on_batch(input=mask_pred, target=mask)
         dice = dice_fn.run_on_batch(input=mask_pred, target=mask)
+        
+        # Invert the loss -> metrics
+        iou = 1 - iou
+        dice = 1 - dice
 
         # iou_mse = [batch_size, 3]
         iou_mse = (iou - iou_pred).square().mean(dim=1)
@@ -99,16 +103,18 @@ def evaluate(sam_train: SamTrain, dataset: FLARE22, batch_size: int):
 if __name__ == "__main__":
     path = "./sam_vit_b_01ec64.pth"
     model = sam_model_registry["vit_b"](path)
+    model.to('cuda:0')
     sam_train = SamTrain(sam_model=model)
-    FLARE22.LIMIT = 20
+    # FLARE22.LIMIT = 20
     dataset = FLARE22(
         pre_trained_sam=sam_train.model,
         metadata_path="dataset/FLARE22-version1/val_metadata.json",
         cache_name="simple-dataset/validation",
-        is_debug=True,
+        is_debug=False,
+        device='cuda:0'
     )
     dataset.preprocess()
     dataset.preload()
-    metrics = evaluate(sam_train=sam_train, dataset=dataset, batch_size=2)
+    metrics = evaluate(sam_train=sam_train, dataset=dataset, batch_size=32)
     print("🚀 ~ file: eval.py:97 ~ metrics:", metrics)
     pass

@@ -119,7 +119,7 @@ class SinglePointObjDetectFile:
 
 class FLARE22(Dataset):
     # FOR DEBUG
-    LIMIT = 10
+    LIMIT = 20
 
     def __init__(
         self,
