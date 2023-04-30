@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from scipy.ndimage import gaussian_filter
 import numpy as np
-from utils import argmax_dist
+from scripts.utils import argmax_dist
 
 
 @dataclass
@@ -22,8 +22,12 @@ def mask_out(mask, bbox: BBoxProperty):
 
 
 class PointUtils:
+
+    # FIXME: this function is not working as expected
     def positive_center_point(self, mask, class_number):
-        filter_center_candidate = gaussian_filter(mask == class_number, 10)
+        filter_center_candidate = gaussian_filter(
+            (mask == class_number).astype(np.float32), 10
+        )
         #  Precise positive
         [row, col] = np.argwhere(filter_center_candidate > 0.0)[0]
         return row, col
@@ -59,7 +63,8 @@ class PointUtils:
         if coors.shape[0] == 0:
             return None, None
 
-        row, col = self.positive_center_point(mask, class_number)
+        # row, col = self.positive_center_point(mask, class_number)
+        row, col = coors[np.random.randint(low=0, high=coors.shape[0])]
 
         # Make the col/row and label
         coors = np.array([[col, row]])

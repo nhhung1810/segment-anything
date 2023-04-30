@@ -9,6 +9,7 @@ from scripts.datasets.constant import (
     IMAGE_TYPE,
     FLARE22_LABEL_ENUM,
     TRAIN_METADATA,
+    VAL_METADATA,
 )
 from typing import Dict, List, Optional
 from torch.utils.data import Dataset, DataLoader
@@ -16,6 +17,7 @@ from scripts.point_utils import PointUtils
 from scripts.train.sam_train import SamTrain
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
+import matplotlib.pyplot as plt
 from scripts.utils import (
     load_file_npz,
     load_img,
@@ -207,7 +209,10 @@ class FLARE22_One_Point(Dataset):
             }
 
             for _cls_value in np.unique(masks):
+                if _cls_value == 0:
+                    continue
                 coors, labels = self.make_one_positive_point(masks, _cls_value)
+
                 _value = {
                     "mask": torch.as_tensor(masks == _cls_value),
                     "coors": coors,
@@ -222,6 +227,9 @@ class FLARE22_One_Point(Dataset):
     def make_one_positive_point(self, masks, class_number):
         p = PointUtils()
         coors, label = p.one_positive(masks, class_number)
+        # plt.imshow(masks == class_number)
+        # plt.scatter(coors[:, 0], coors[:, 1], c="g")
+        # plt.show()
         return torch.as_tensor(coors), torch.as_tensor(label)
 
     def _is_valid_mask(self, masks):
@@ -287,11 +295,16 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 
 
 if __name__ == "__main__":
-    # sam = load_model()
+    sam = load_model()
     # # sam.to("cuda:0")
-    # FLARE22.LIMIT = 20
-    # dataset = FLARE22(is_debug=False, pre_trained_sam=sam)
-    # dataset.preprocess()
+    FLARE22_One_Point.LIMIT = 10
+    dataset = FLARE22_One_Point(
+        is_debug=True,
+        pre_trained_sam=sam,
+        metadata_path=VAL_METADATA,
+        cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
+    )
+    dataset.preprocess()
     # print(len(dataset))
     # loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
     # for batch in loader:
