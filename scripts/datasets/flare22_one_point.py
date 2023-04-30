@@ -157,7 +157,7 @@ class FLARE22_One_Point(Dataset):
         # For one point context, we view multiple positive point as 
         # multiple batch for 1 image -> [N, 2] -> [N, 1, 2]
         coors = coors.view(coors.shape[0], 1, 2)
-        labels = torch.ones(self.coors_limit, 1, 1)
+        labels = torch.ones(coors.shape[0], 1, 1)
 
         return dict(
             img_emb=img_emb.to(self.device),
@@ -295,8 +295,8 @@ if __name__ == "__main__":
     sam.to("cuda:0")
     FLARE22_One_Point.LIMIT = 20
     dataset = FLARE22_One_Point(
-        cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
-        metadata_path=VAL_METADATA,
+        cache_name=FLARE22_One_Point.TRAIN_CACHE_NAME,
+        metadata_path=TRAIN_METADATA,
         is_debug=False, 
         pre_trained_sam=sam, 
         device=sam.device

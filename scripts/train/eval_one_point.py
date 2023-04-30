@@ -61,11 +61,13 @@ def make_metrics(ious: list, dices: list, iou_mses: list, selected_indices):
 
 
 @torch.no_grad()
-def evaluate(sam_train: SamTrain, dataset: FLARE22_One_Point, batch_size: int):
+def evaluate(sam_train: SamTrain, dataset: FLARE22_One_Point):
     # Eval need to activation
     iou_fn = IoULoss(activation=None, reduction="none")
     dice_fn = DiceLoss(activation=None, reduction="none")
-    loader = DataLoader(dataset=dataset, batch_size=batch_size, drop_last=False)
+    loader = DataLoader(
+        dataset=dataset, batch_size=1, drop_last=False
+        )
 
     ious = []
     dices = []
@@ -131,8 +133,10 @@ if __name__ == "__main__":
         metadata_path=VAL_METADATA,
         cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=False,
-        device='cuda:0'
+        device='cuda:0',
+        coors_limit=1
     )
+    dataset.preprocess()
     
     # path = "./sam_vit_b_01ec64.pth"
     run_name = "sam-fix-iou-230429-011855"

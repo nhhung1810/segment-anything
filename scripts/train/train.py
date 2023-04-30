@@ -75,10 +75,6 @@ def config():
     # Model params
     focal_gamma = 2.0
     focal_alpha = None
-    # label_smoothing = 0.1
-    # sequence_length = 327680
-    # model_complexity = 16
-    # model_complexity_lstm = 16
 
     # Optim params
     learning_rate = 6e-6
@@ -128,7 +124,7 @@ def make_model(
     model.to(device=device)
 
     if resume_iteration is None:
-        logger.warning("Fresh-new model is initialized")
+        logger.warning("Initialize from pre-train")
         optimizer = torch.optim.Adam(model.parameters(), learning_rate)
         resume_iteration = 0
 
@@ -162,20 +158,6 @@ def checkpoint(model: Sam, device: str, save_path: str):
     model.to(device)
 
     pass
-
-
-def offload_gpu(dataset: FLARE22):
-    _device = dataset.device
-    dataset.device = "cpu"
-    _loader = DataLoader(dataset=dataset, batch_size=32, drop_last=False)
-    for _ in tqdm(_loader, desc="Off-loading GPU before validation..."):
-        pass
-    # Give back the device
-    dataset.device = _device
-    torch.cuda.empty_cache()
-    _ = gc.collect()
-    pass
-
 
 @ex.capture
 def run_evaluate(sam_train: SamTrain, device: str, batch_size: int) -> dict:
