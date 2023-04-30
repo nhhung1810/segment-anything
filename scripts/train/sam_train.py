@@ -139,7 +139,8 @@ class SamTrain:
         labels_torch = torch.as_tensor(
             point_labels, dtype=torch.int, device=self.device
         )
-        coords_torch, labels_torch = coords_torch[None, :, :], labels_torch[None, :]
+        coords_torch = coords_torch.view(-1, *coords_torch.shape[-2:])
+        labels_torch = labels_torch.view(-1, *labels_torch.shape[-1:])
 
         return coords_torch, labels_torch
 
@@ -177,7 +178,7 @@ class SamTrain:
             boxes=boxes,
             masks=mask_input,
         )
-
+        # dense_embeddings = dense_embeddings[:1, ...]
         # Predict masks
         low_res_masks, iou_predictions = self.model.mask_decoder(
             image_embeddings=image_emb,

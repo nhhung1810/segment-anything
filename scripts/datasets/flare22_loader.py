@@ -128,6 +128,8 @@ class FLARE22(Dataset):
         self.original_size = None
 
     def preload(self, strict=False):
+        if len(self.dataset) > 0:
+            return
         for data in tqdm(
             self.file.data, desc="Preload data to RAM", total=len(self.file.data)
         ):

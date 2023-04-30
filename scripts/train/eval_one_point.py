@@ -5,7 +5,8 @@ import numpy as np
 from torch import nn
 import torch
 from tqdm import tqdm
-from scripts.datasets.flare22_loader import FLARE22
+from scripts.datasets.constant import VAL_METADATA
+from scripts.datasets.flare22_one_point import FLARE22_One_Point
 from scripts.train.sam_train import SamTrain
 from torch.utils.data import DataLoader
 
@@ -60,7 +61,7 @@ def make_metrics(ious: list, dices: list, iou_mses: list, selected_indices):
 
 
 @torch.no_grad()
-def evaluate(sam_train: SamTrain, dataset: FLARE22, batch_size: int):
+def evaluate(sam_train: SamTrain, dataset: FLARE22_One_Point, batch_size: int):
     # Eval need to activation
     iou_fn = IoULoss(activation=None, reduction="none")
     dice_fn = DiceLoss(activation=None, reduction="none")
@@ -73,7 +74,15 @@ def evaluate(sam_train: SamTrain, dataset: FLARE22, batch_size: int):
     select_indices = []
 
     input_size, original_size = dataset.get_size()
-    for idx, batch in enumerate(loader):
+    for _, batch in enumerate(loader):
+
+        coords_torch, labels_torch, _, _ = sam_train.prepare_prompt(
+            original_size=original_size,
+            point_coords=batch['coors'],
+            point_labels=batch['labels'],
+         )
+        
+
         mask_pred, iou_pred, _ = sam_train.predict_torch(
             image_emb=batch["img_emb"],
             input_size=input_size,
@@ -81,6 +90,9 @@ def evaluate(sam_train: SamTrain, dataset: FLARE22, batch_size: int):
             multimask_output=True,
             # Eval need no logits
             return_logits=False,
+            point_coords=coords_torch,
+            point_labels=labels_torch,
+            mask_input=None,
         )
 
         mask = batch["mask"]
@@ -114,10 +126,10 @@ if __name__ == "__main__":
     from pprint import PrettyPrinter
 
     pp = PrettyPrinter(indent=2)
-    dataset = FLARE22(
+    dataset = FLARE22_One_Point(
         pre_trained_sam=None,
-        metadata_path="dataset/FLARE22-version1/val_metadata.json",
-        cache_name="simple-dataset/validation",
+        metadata_path=VAL_METADATA,
+        cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=False,
         device='cuda:0'
     )
@@ -138,7 +150,7 @@ if __name__ == "__main__":
         model.to('cuda:0')
         sam_train = SamTrain(sam_model=model)
         dataset.preload()
-        metrics = evaluate(sam_train=sam_train, dataset=dataset, batch_size=32)
+        metrics = evaluate(sam_train=sam_train, dataset=dataset, batch_size=1)
         save[entry['name']] = metrics
 
     with open(f"{run_name}-all_metrics.json", 'w') as out:

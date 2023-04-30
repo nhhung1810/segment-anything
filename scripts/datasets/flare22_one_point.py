@@ -100,7 +100,7 @@ class FLARE22_One_Point(Dataset):
     # FOR DEBUG
     LIMIT = 20
     TRAIN_CACHE_NAME = "flare22-one-point/train"
-    VAL_CACHE_NAME = "flare22-dataset/validation"
+    VAL_CACHE_NAME = "flare22-one-point/validation"
 
     def __init__(
         self,
@@ -147,10 +147,15 @@ class FLARE22_One_Point(Dataset):
         # Remove the batch element
         img_emb = data["img_emb"][0]
         mask = data["mask"]
+        coors = data["coors"]
+        labels = data["labels"]
+
 
         return dict(
             img_emb=img_emb.to(self.device),
             mask=mask.to(self.device),
+            coors=coors.to(self.device),
+            labels=labels.to(self.device),
         )
 
     def __len__(self):
@@ -162,6 +167,7 @@ class FLARE22_One_Point(Dataset):
         return input_size, original_size
 
     def preload(self):
+        if len(self.dataset) > 0: return
         for data in tqdm(
             self.file.data, desc="Preload data to RAM", total=len(self.file.data)
         ):
@@ -247,7 +253,7 @@ class FLARE22_One_Point(Dataset):
         if self.original_size is None:
             self.original_size = _size["original_size"]
             pass
-        self._assert_size(_emb)
+        self._assert_size(_size)
 
         # Append into dataset
         for _, v in _masks.items():
@@ -296,21 +302,23 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 
 if __name__ == "__main__":
     sam = load_model()
-    # # sam.to("cuda:0")
-    FLARE22_One_Point.LIMIT = 10
+    sam.to("cuda:0")
+    FLARE22_One_Point.LIMIT = 20
     dataset = FLARE22_One_Point(
-        is_debug=True,
-        pre_trained_sam=sam,
-        metadata_path=VAL_METADATA,
         cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
-    )
+        metadata_path=VAL_METADATA,
+        is_debug=False, 
+        pre_trained_sam=sam, 
+        device=sam.device
+        )
     dataset.preprocess()
-    # print(len(dataset))
-    # loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
-    # for batch in loader:
-    #     for k, v in batch.items():
-    #         print(f"{k} : {v.shape}")
-    #         pass
-    #     break
+    dataset.preload()
+    print(len(dataset))
+    loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
+    for batch in loader:
+        for k, v in batch.items():
+            print(f"{k} : {v.shape}")
+            pass
+        break
 
     pass
