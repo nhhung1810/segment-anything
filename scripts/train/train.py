@@ -48,6 +48,14 @@ logger.add(
     format="\n<lvl>[{time:DD:MMM:YY HH:mm:ss}] - [{level}] - {message}</lvl>",
 )
 
+# Reproducibility
+import random
+import numpy as np
+torch.manual_seed(0)
+random.seed(0)
+np.random.seed(0)
+
+
 
 @ex.config
 def config():

@@ -110,10 +110,14 @@ class FLARE22_One_Point(Dataset):
         cache_name: str = TRAIN_CACHE_NAME,
         is_debug: bool = False,
         device: str = "cpu",
+        # The limit to genenate random coordinate base on mask. 
+        # In some case, this would act like batch size
+        coors_limit: int = 2,
     ) -> None:
         super().__init__()
         # For preprocess data
         self.device = device
+        self.coors_limit = coors_limit
         self.pre_trained_sam = pre_trained_sam
         if pre_trained_sam:
             self.pre_trained_sam.eval()
@@ -147,9 +151,13 @@ class FLARE22_One_Point(Dataset):
         # Remove the batch element
         img_emb = data["img_emb"][0]
         mask = data["mask"]
-        coors = data["coors"]
-        labels = data["labels"]
-
+        # Random sampling
+        coors = torch.argwhere(mask)
+        coors = coors[torch.randperm(coors.shape[0])][:self.coors_limit]
+        # For one point context, we view multiple positive point as 
+        # multiple batch for 1 image -> [N, 2] -> [N, 1, 2]
+        coors = coors.view(coors.shape[0], 1, 2)
+        labels = torch.ones(self.coors_limit, 1, 1)
 
         return dict(
             img_emb=img_emb.to(self.device),
@@ -200,7 +208,7 @@ class FLARE22_One_Point(Dataset):
 
             # If don't have the data dict for this img -> create it
             masks = load_file_npz(data["mask_path"])
-            if self._is_valid_mask(masks):
+            if self.is_not_valid_mask(masks):
                 continue
             # Calculate the embedding
             img = load_img(data["img_path"])
@@ -217,12 +225,9 @@ class FLARE22_One_Point(Dataset):
             for _cls_value in np.unique(masks):
                 if _cls_value == 0:
                     continue
-                coors, labels = self.make_one_positive_point(masks, _cls_value)
 
                 _value = {
                     "mask": torch.as_tensor(masks == _cls_value),
-                    "coors": coors,
-                    "labels": labels,
                 }
                 data_dict[f"{_cls_value}"] = _value
                 pass
@@ -230,15 +235,7 @@ class FLARE22_One_Point(Dataset):
             torch.save(data_dict, cache_path)
         pass
 
-    def make_one_positive_point(self, masks, class_number):
-        p = PointUtils()
-        coors, label = p.one_positive(masks, class_number)
-        # plt.imshow(masks == class_number)
-        # plt.scatter(coors[:, 0], coors[:, 1], c="g")
-        # plt.show()
-        return torch.as_tensor(coors), torch.as_tensor(label)
-
-    def _is_valid_mask(self, masks):
+    def is_not_valid_mask(self, masks):
         """Filter out bad mask"""
         return masks.max() == FLARE22_LABEL_ENUM.BACK_GROUND.value
 
@@ -257,14 +254,7 @@ class FLARE22_One_Point(Dataset):
 
         # Append into dataset
         for _, v in _masks.items():
-            self.dataset.append(
-                {
-                    **_emb,
-                    "mask": v["mask"],
-                    "coors": v["coors"],
-                    "labels": v["labels"],
-                }
-            )
+            self.dataset.append({**_emb,"mask": v["mask"]})
         pass
 
     def _assert_size(self, d):
