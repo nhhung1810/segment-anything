@@ -51,6 +51,7 @@ logger.add(
 # Reproducibility
 import random
 import numpy as np
+
 torch.manual_seed(0)
 random.seed(0)
 np.random.seed(0)
@@ -60,10 +61,10 @@ np.random.seed(0)
 def config():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # NOTE: this is a very important issue with prompt training as batch-size for 
+    # NOTE: this is a very important issue with prompt training as batch-size for
     # image embedding must be always 1. For safety I disable it.
     # batch_size = 1
-    
+
     # NOTE: however, one image can be train with batch one-points (prompts)
     num_of_prompt_per_image = 16
     logdir = f"runs/{NAME}-{TIME}"
@@ -89,7 +90,9 @@ def config():
 
 
 @ex.capture
-def make_dataset(device, num_of_prompt_per_image) -> Tuple[FLARE22_One_Point, DataLoader]:
+def make_dataset(
+    device, num_of_prompt_per_image
+) -> Tuple[FLARE22_One_Point, DataLoader]:
     # Save GPU by host the dataset on cpu only
     dataset = FLARE22_One_Point(
         metadata_path=TRAIN_METADATA,
@@ -109,7 +112,7 @@ def make_dataset(device, num_of_prompt_per_image) -> Tuple[FLARE22_One_Point, Da
         cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device="cpu",
-        coors_limit=1
+        coors_limit=1,
     ).preprocess()
     return dataset, loader
 
@@ -168,6 +171,7 @@ def checkpoint(model: Sam, device: str, save_path: str):
 
     pass
 
+
 @ex.capture
 def run_evaluate(sam_train: SamTrain, device: str) -> dict:
     dataset = FLARE22_One_Point(
@@ -175,9 +179,9 @@ def run_evaluate(sam_train: SamTrain, device: str) -> dict:
         cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device=device,
-        # Eval state will only need 
+        # Eval state will only need
         # 1 positive prompt
-        coors_limit=1
+        coors_limit=1,
     )
     dataset.preload()
     return evaluate(sam_train, dataset)
@@ -221,9 +225,9 @@ def train(
             # labels: Tensor = batch["labels"]
 
             coords_torch, labels_torch, _, _ = sam_train.prepare_prompt(
-              original_size=original_size,
-                point_coords=batch['coors'],
-                point_labels=batch['labels'],
+                original_size=original_size,
+                point_coords=batch["coors"],
+                point_labels=batch["labels"],
             )
 
             masks_pred, iou_pred, _ = sam_train.predict_torch(
@@ -238,7 +242,12 @@ def train(
 
             # 1 mask have to clone to fit the number of promp
             # and the number of multiple-mask
-            mask = mask.repeat_interleave(masks_pred.shape[0], dim=0).unsqueeze(1).repeat_interleave(3, dim=1).type(torch.int64)
+            mask = (
+                mask.repeat_interleave(masks_pred.shape[0], dim=0)
+                .unsqueeze(1)
+                .repeat_interleave(3, dim=1)
+                .type(torch.int64)
+            )
 
             loss = loss_fnc.forward(
                 multi_mask_pred=masks_pred,
