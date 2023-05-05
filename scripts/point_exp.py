@@ -1,5 +1,6 @@
 from glob import glob
 import os
+import torch
 from tqdm import tqdm
 from scripts.constants import (
     FLARE22_SMALL_PATH,
@@ -98,10 +99,8 @@ def point_experiment(
         index_number = extract_index(path)
 
         # Only calculate 1
-        if point_coords is None or point_labels is None:
-            point_coords, point_labels = point_generator.no_prompt(
-                # mask, chosen_class
-            )
+        # if point_coords is None or point_labels is None:
+        point_coords, point_labels = point_generator.one_positive(mask, chosen_class)
 
         # predictor.set_image(img)
         cache_set_image(predictor, path, img)
@@ -156,21 +155,17 @@ def make_data_mask_path(group_name):
 
 
 if __name__ == "__main__":
-    CHECKPOINT_DIR = "runs/sam-fix-iou-230427-144454"
+    CHECKPOINT_DIR = "runs/sam-one-point-230501-012024"
     groups = [VAL_GROUP1, VAL_GROUP2, VAL_GROUP3]
     model_list = [
         dict(model_name="pretrained", model_path=None),
-        dict(model_name="20", model_path=f"{CHECKPOINT_DIR}/model-20.pt"),
-        dict(model_name="40", model_path=f"{CHECKPOINT_DIR}/model-40.pt"),
-        dict(model_name="60", model_path=f"{CHECKPOINT_DIR}/model-60.pt"),
-        dict(model_name="80", model_path=f"{CHECKPOINT_DIR}/model-80.pt"),
-        dict(model_name="100", model_path=f"{CHECKPOINT_DIR}/model-100.pt"),
-        dict(model_name="120", model_path=f"{CHECKPOINT_DIR}/model-120.pt"),
-        dict(model_name="140", model_path=f"{CHECKPOINT_DIR}/model-140.pt"),
-        dict(model_name="160", model_path=f"{CHECKPOINT_DIR}/model-160.pt"),
-        dict(model_name="180", model_path=f"{CHECKPOINT_DIR}/model-180.pt"),
-        dict(model_name="200", model_path=f"{CHECKPOINT_DIR}/model-200.pt"),
+        dict(model_name="1", model_path=f"{CHECKPOINT_DIR}/model-1.pt"),
+        dict(model_name="10", model_path=f"{CHECKPOINT_DIR}/model-10.pt"),
     ]
+
+    if os.path.exists("./point-exp-val.pt"):
+        cache = torch.load("./point-exp-val.pt")
+        pass
 
     for entry in model_list:
         for group_name in groups:
@@ -182,7 +177,9 @@ if __name__ == "__main__":
                 chosen_class=1,
                 class_name="liver",
                 group_name=group_name,
-                out_dir=f"{FLARE22_SMALL_PATH}/fix-iou-grad-acc-4-no-point/",
+                out_dir=f"{FLARE22_SMALL_PATH}/sam-one-point-grad-acc-4-one-point/",
                 data_mask_path=make_data_mask_path(group_name),
             )
+
+    torch.save(cache, "./point-exp-val.pt")
     pass
