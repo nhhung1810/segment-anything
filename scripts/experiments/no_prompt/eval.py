@@ -2,15 +2,14 @@ from glob import glob
 import json
 import os
 import numpy as np
-from torch import nn
 import torch
 from tqdm import tqdm
 from scripts.datasets.flare22_loader import FLARE22
-from scripts.train.sam_train import SamTrain
+from scripts.sam_train import SamTrain
 from torch.utils.data import DataLoader
 
 from segment_anything.build_sam import sam_model_registry
-from scripts.train.loss import IoULoss, DiceLoss
+from scripts.losses.loss import IoULoss, DiceLoss
 from segment_anything.modeling.sam import Sam
 
 
@@ -119,9 +118,9 @@ if __name__ == "__main__":
         metadata_path="dataset/FLARE22-version1/val_metadata.json",
         cache_name="simple-dataset/validation",
         is_debug=False,
-        device='cuda:0'
+        device="cuda:0",
     )
-    
+
     # path = "./sam_vit_b_01ec64.pth"
     run_name = "sam-fix-iou-230429-011855"
     runs_dir = f"runs/{run_name}"
@@ -129,18 +128,20 @@ if __name__ == "__main__":
     paths = glob(f"{runs_dir}/model-*.pt")
     model_entries = [
         {"name": "pretrain", "custom": None},
-        *[{"name": os.path.basename(path), "custom": path} for path in paths]
+        *[{"name": os.path.basename(path), "custom": path} for path in paths],
     ]
-    for entry in tqdm(model_entries, desc='Runing eval on checkpoint', total=len(model_entries)):
+    for entry in tqdm(
+        model_entries, desc="Runing eval on checkpoint", total=len(model_entries)
+    ):
         model: Sam = sam_model_registry["vit_b"](
-            checkpoint="./sam_vit_b_01ec64.pth", custom=entry['custom']
-            )
-        model.to('cuda:0')
+            checkpoint="./sam_vit_b_01ec64.pth", custom=entry["custom"]
+        )
+        model.to("cuda:0")
         sam_train = SamTrain(sam_model=model)
         dataset.preload()
         metrics = evaluate(sam_train=sam_train, dataset=dataset, batch_size=32)
-        save[entry['name']] = metrics
+        save[entry["name"]] = metrics
 
-    with open(f"{run_name}-all_metrics.json", 'w') as out:
+    with open(f"{run_name}-all_metrics.json", "w") as out:
         json.dump(save, out)
     pass

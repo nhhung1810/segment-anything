@@ -7,11 +7,11 @@ import torch
 from tqdm import tqdm
 from scripts.datasets.constant import VAL_METADATA
 from scripts.datasets.flare22_one_point import FLARE22_One_Point
-from scripts.train.sam_train import SamTrain
+from scripts.sam_train import SamTrain
 from torch.utils.data import DataLoader
 
 from segment_anything.build_sam import sam_model_registry
-from scripts.train.loss import IoULoss, DiceLoss
+from scripts.losses.loss import IoULoss, DiceLoss
 from segment_anything.modeling.sam import Sam
 
 
@@ -65,9 +65,7 @@ def evaluate(sam_train: SamTrain, dataset: FLARE22_One_Point):
     # Eval need to activation
     iou_fn = IoULoss(activation=None, reduction="none")
     dice_fn = DiceLoss(activation=None, reduction="none")
-    loader = DataLoader(
-        dataset=dataset, batch_size=1, drop_last=False
-        )
+    loader = DataLoader(dataset=dataset, batch_size=1, drop_last=False)
 
     ious = []
     dices = []
@@ -77,13 +75,11 @@ def evaluate(sam_train: SamTrain, dataset: FLARE22_One_Point):
 
     input_size, original_size = dataset.get_size()
     for _, batch in enumerate(loader):
-
         coords_torch, labels_torch, _, _ = sam_train.prepare_prompt(
             original_size=original_size,
-            point_coords=batch['coors'],
-            point_labels=batch['labels'],
-         )
-        
+            point_coords=batch["coors"],
+            point_labels=batch["labels"],
+        )
 
         mask_pred, iou_pred, _ = sam_train.predict_torch(
             image_emb=batch["img_emb"],
@@ -133,11 +129,11 @@ if __name__ == "__main__":
         metadata_path=VAL_METADATA,
         cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=False,
-        device='cuda:0',
-        coors_limit=1
+        device="cuda:0",
+        coors_limit=1,
     )
     dataset.preprocess()
-    
+
     # path = "./sam_vit_b_01ec64.pth"
     run_name = "sam-fix-iou-230429-011855"
     runs_dir = f"runs/{run_name}"
@@ -145,18 +141,20 @@ if __name__ == "__main__":
     paths = glob(f"{runs_dir}/model-*.pt")
     model_entries = [
         {"name": "pretrain", "custom": None},
-        *[{"name": os.path.basename(path), "custom": path} for path in paths]
+        *[{"name": os.path.basename(path), "custom": path} for path in paths],
     ]
-    for entry in tqdm(model_entries, desc='Runing eval on checkpoint', total=len(model_entries)):
+    for entry in tqdm(
+        model_entries, desc="Running eval on checkpoint", total=len(model_entries)
+    ):
         model: Sam = sam_model_registry["vit_b"](
-            checkpoint="./sam_vit_b_01ec64.pth", custom=entry['custom']
-            )
-        model.to('cuda:0')
+            checkpoint="./sam_vit_b_01ec64.pth", custom=entry["custom"]
+        )
+        model.to("cuda:0")
         sam_train = SamTrain(sam_model=model)
         dataset.preload()
         metrics = evaluate(sam_train=sam_train, dataset=dataset, batch_size=1)
-        save[entry['name']] = metrics
+        save[entry["name"]] = metrics
 
-    with open(f"{run_name}-all_metrics.json", 'w') as out:
+    with open(f"{run_name}-all_metrics.json", "w") as out:
         json.dump(save, out)
     pass

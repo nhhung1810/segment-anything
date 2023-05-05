@@ -3,41 +3,41 @@
 """
 @Time   : 2022-05-12
 @Author : nhhung1810
-@File   : train.py
+@File   : train_one_point.py
 
 """
-import gc
+import numpy as np
+import torch
+from torch import Tensor
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import StepLR
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+import random
+from segment_anything.build_sam import sam_model_registry
+from segment_anything.modeling.sam import Sam
+
 import os
 import sys
-from datetime import datetime
-import loguru
-from loguru import logger
-from typing import Tuple
 from copy import deepcopy
-import numpy as np
+from datetime import datetime
+from loguru import logger
 from sacred import Experiment
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
-from torch import Tensor
-from torch.nn.utils import clip_grad_norm_
-from torch.optim.lr_scheduler import StepLR
-from torch.optim import Optimizer
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
-import torch
-from scripts.train.eval import evaluate
+from scripts.datasets.constant import TRAIN_METADATA, VAL_METADATA
 
 # Internal
-from scripts.datasets.flare22_loader import FLARE22
-from scripts.train.loss import MultimaskSamLoss
-from scripts.train.sam_train import SamTrain
+from scripts.datasets.flare22_one_point import FLARE22_One_Point
+from scripts.experiments.one_point.eval_one_point import evaluate
+from scripts.losses.loss import MultimaskSamLoss
+from scripts.sam_train import SamTrain
 from scripts.utils import summary
-from segment_anything.modeling.sam import Sam
-from segment_anything.build_sam import sam_model_registry
+from tqdm import tqdm
+from typing import Tuple
 
 IS_DEBUG = False
-NAME = "sam-fix-iou"
+NAME = "sam-one-point"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -48,29 +48,32 @@ logger.add(
     format="\n<lvl>[{time:DD:MMM:YY HH:mm:ss}] - [{level}] - {message}</lvl>",
 )
 
+
 # Reproducibility
-import random
-import numpy as np
+
 torch.manual_seed(0)
 random.seed(0)
 np.random.seed(0)
-
 
 
 @ex.config
 def config():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # NOTE: the effective batch-size will = batch_size * gradient_accumulation_step
-    batch_size = 32
+    # NOTE: this is a very important issue with prompt training as batch-size for
+    # image embedding must be always 1. For safety I disable it.
+    # batch_size = 1
+
+    # NOTE: however, one image can be train with batch one-points (prompts)
+    num_of_prompt_per_image = 16
     logdir = f"runs/{NAME}-{TIME}"
     resume_iteration = None
-    n_epochs = 100
-    save_epoch = 20
-    evaluate_epoch = 20
+    n_epochs = 10
+    save_epoch = 1
+    evaluate_epoch = 1
 
-    # NOTE
-    gradient_accumulation_step = 1
+    # NOTE: as the batch-size now reduce to 1, we have to increase acc. step
+    gradient_accumulation_step = 32
 
     # Model params
     focal_gamma = 2.0
@@ -78,29 +81,37 @@ def config():
 
     # Optim params
     learning_rate = 6e-6
-    learning_rate_decay_steps = 10 * gradient_accumulation_step
+    learning_rate_decay_steps = 2
     learning_rate_decay_rate = 0.98
-    clip_gradient_norm = 3
 
     ex.observers.append(FileStorageObserver.create(logdir))
     pass
 
 
 @ex.capture
-def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
+def make_dataset(
+    device, num_of_prompt_per_image
+) -> Tuple[FLARE22_One_Point, DataLoader]:
     # Save GPU by host the dataset on cpu only
-    dataset = FLARE22(is_debug=IS_DEBUG, device=device)
+    dataset = FLARE22_One_Point(
+        metadata_path=TRAIN_METADATA,
+        cache_name=FLARE22_One_Point.TRAIN_CACHE_NAME,
+        is_debug=IS_DEBUG,
+        device=device,
+        coors_limit=num_of_prompt_per_image,
+    )
     dataset.preprocess()
-    dataset.preload(strict=False)
+    dataset.preload()
     dataset.self_check()
-    loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
+    loader = DataLoader(dataset, batch_size=1, shuffle=True, drop_last=True)
 
     # Make sure that the evaluation dataset also work
-    _ = FLARE22(
-        metadata_path="dataset/FLARE22-version1/val_metadata.json",
-        cache_name="simple-dataset/validation",
+    _ = FLARE22_One_Point(
+        metadata_path=VAL_METADATA,
+        cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device="cpu",
+        coors_limit=1,
     ).preprocess()
     return dataset, loader
 
@@ -159,16 +170,20 @@ def checkpoint(model: Sam, device: str, save_path: str):
 
     pass
 
+
 @ex.capture
-def run_evaluate(sam_train: SamTrain, device: str, batch_size: int) -> dict:
-    dataset = FLARE22(
-        metadata_path="dataset/FLARE22-version1/val_metadata.json",
-        cache_name="simple-dataset/validation",
+def run_evaluate(sam_train: SamTrain, device: str) -> dict:
+    dataset = FLARE22_One_Point(
+        metadata_path=VAL_METADATA,
+        cache_name=FLARE22_One_Point.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device=device,
+        # Eval state will only need
+        # 1 positive prompt
+        coors_limit=1,
     )
     dataset.preload()
-    return evaluate(sam_train, dataset, batch_size=batch_size // 2)
+    return evaluate(sam_train, dataset)
 
 
 @ex.automain
@@ -178,8 +193,8 @@ def train(
     n_epochs,
     save_epoch,
     evaluate_epoch,
-    clip_gradient_norm,
     gradient_accumulation_step,
+    num_of_prompt_per_image,
 ):
     print_config(ex.current_run)
     os.makedirs(logdir, exist_ok=True)
@@ -189,7 +204,7 @@ def train(
     sam_train, optimizer, scheduler, loss_fnc = make_model()
 
     assert isinstance(sam_train, SamTrain), ""
-    assert isinstance(train_dataset, FLARE22), ""
+    assert isinstance(train_dataset, FLARE22_One_Point), ""
     assert isinstance(optimizer, Optimizer), ""
     assert isinstance(scheduler, StepLR), ""
     assert isinstance(loss_fnc, MultimaskSamLoss), ""
@@ -205,17 +220,33 @@ def train(
         ):
             img_emb: Tensor = batch["img_emb"]
             mask: Tensor = batch["mask"]
+            # coors: Tensor = batch["coors"]
+            # labels: Tensor = batch["labels"]
+
+            coords_torch, labels_torch, _, _ = sam_train.prepare_prompt(
+                original_size=original_size,
+                point_coords=batch["coors"],
+                point_labels=batch["labels"],
+            )
 
             masks_pred, iou_pred, _ = sam_train.predict_torch(
                 image_emb=img_emb,
                 input_size=input_size,
                 original_size=original_size,
+                point_coords=coords_torch,
+                point_labels=labels_torch,
                 multimask_output=True,
                 return_logits=True,
             )
 
-            # Make 3 mask for 3 multi-mask of model
-            mask = mask.unsqueeze(1).repeat_interleave(3, dim=1).type(torch.int64)
+            # 1 mask have to clone to fit the number of prompt
+            # and the number of multiple-mask
+            mask = (
+                mask.repeat_interleave(masks_pred.shape[0], dim=0)
+                .unsqueeze(1)
+                .repeat_interleave(3, dim=1)
+                .type(torch.int64)
+            )
 
             loss = loss_fnc.forward(
                 multi_mask_pred=masks_pred,

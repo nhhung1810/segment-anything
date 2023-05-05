@@ -14,7 +14,7 @@ from scripts.datasets.constant import (
 from typing import Dict, List, Optional
 from torch.utils.data import Dataset, DataLoader
 from scripts.point_utils import PointUtils
-from scripts.train.sam_train import SamTrain
+from scripts.sam_train import SamTrain
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 import matplotlib.pyplot as plt
@@ -110,7 +110,7 @@ class FLARE22_One_Point(Dataset):
         cache_name: str = TRAIN_CACHE_NAME,
         is_debug: bool = False,
         device: str = "cpu",
-        # The limit to genenate random coordinate base on mask. 
+        # The limit to genenate random coordinate base on mask.
         # In some case, this would act like batch size
         coors_limit: int = 2,
     ) -> None:
@@ -153,8 +153,8 @@ class FLARE22_One_Point(Dataset):
         mask = data["mask"]
         # Random sampling
         coors = torch.argwhere(mask)
-        coors = coors[torch.randperm(coors.shape[0])][:self.coors_limit]
-        # For one point context, we view multiple positive point as 
+        coors = coors[torch.randperm(coors.shape[0])][: self.coors_limit]
+        # For one point context, we view multiple positive point as
         # multiple batch for 1 image -> [N, 2] -> [N, 1, 2]
         coors = coors.view(coors.shape[0], 1, 2)
         labels = torch.ones(coors.shape[0], 1, 1)
@@ -175,7 +175,8 @@ class FLARE22_One_Point(Dataset):
         return input_size, original_size
 
     def preload(self):
-        if len(self.dataset) > 0: return
+        if len(self.dataset) > 0:
+            return
         for data in tqdm(
             self.file.data, desc="Preload data to RAM", total=len(self.file.data)
         ):
@@ -254,7 +255,7 @@ class FLARE22_One_Point(Dataset):
 
         # Append into dataset
         for _, v in _masks.items():
-            self.dataset.append({**_emb,"mask": v["mask"]})
+            self.dataset.append({**_emb, "mask": v["mask"]})
         pass
 
     def _assert_size(self, d):
@@ -297,10 +298,10 @@ if __name__ == "__main__":
     dataset = FLARE22_One_Point(
         cache_name=FLARE22_One_Point.TRAIN_CACHE_NAME,
         metadata_path=TRAIN_METADATA,
-        is_debug=False, 
-        pre_trained_sam=sam, 
-        device=sam.device
-        )
+        is_debug=False,
+        pre_trained_sam=sam,
+        device=sam.device,
+    )
     dataset.preprocess()
     dataset.preload()
     print(len(dataset))

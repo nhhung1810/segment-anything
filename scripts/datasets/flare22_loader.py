@@ -12,7 +12,7 @@ from scripts.datasets.constant import (
 )
 from typing import Dict, List, Optional
 from torch.utils.data import Dataset, DataLoader
-from scripts.train.sam_train import SamTrain
+from scripts.sam_train import SamTrain
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 from scripts.utils import (
@@ -115,9 +115,7 @@ class FLARE22(Dataset):
             self.train_sam = SamTrain(self.pre_trained_sam)
         self.dataset_root = dataset_root
 
-        self.file = FileLoader(
-            metadata_path=metadata_path, dataset_root=dataset_root
-        )
+        self.file = FileLoader(metadata_path=metadata_path, dataset_root=dataset_root)
         if is_debug:
             self.file.data = self.file.data[: self.LIMIT]
         self.cache_path = os.path.join(self.dataset_root, cache_name)

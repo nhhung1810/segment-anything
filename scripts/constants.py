@@ -10,6 +10,7 @@ VAL_GROUP1 = (
 )
 VAL_GROUP2 = "FLARE22_Tr_0008_0000/FLARE22_Tr_0008_0000_chest-lungs_chest-mediastinum"
 VAL_GROUP3 = "FLARE22_Tr_0008_0000/FLARE22_Tr_0008_0000_spine-bone"
+FLARE22_SMALL_PATH = "./dataset/FLARE-small"
 
 
 class FLARE22_LABEL_ENUM(Enum):
@@ -33,6 +34,3 @@ class IMAGE_TYPE(Enum):
     ABDOMEN_SOFT_TISSUES_ABDOMEN_LIVER = "abdomen-soft tissues_abdomen-liver"
     CHEST_LUNGS_CHEST_MEDIASTINUM = "chest-lungs_chest-mediastinum"
     SPINE_BONE = "spine-bone"
-
-
-FLARE22_SMALL_PATH = "./dataset/FLARE-small"
