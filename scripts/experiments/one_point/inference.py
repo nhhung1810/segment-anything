@@ -6,7 +6,7 @@ import numpy as np
 from torch import Tensor
 import torch
 from tqdm import tqdm
-from scripts.constants import IMAGE_TYPE
+from scripts.datasets.constant import IMAGE_TYPE
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.sam_train import SamTrain
 from scripts.datasets.constant import VAL_METADATA, DEFAULT_DEVICE
@@ -76,7 +76,7 @@ def frame_inference(
         chosen_idx = dice.argmin()
         mask_pred = mask_pred[0, chosen_idx]
 
-        return mask_pred.detach().cpu().numpy()
+        return mask_pred.detach().cpu().numpy().astype(np.uint8)
 
 
 def inference(
@@ -85,10 +85,11 @@ def inference(
     sam_train: SamTrain,
     inference_save_dir: str,
 ):
+    assert len(images) == len(gts)
     class_num = 1
     dice_fn = DiceLoss(activation=None, reduction="none")
     preprocessor = FLARE22_Preprocess()
-    for image_file, gt_file in zip(images, gts):
+    for image_file, gt_file in tqdm(zip(images, gts), total=len(images), desc="Inference for patient..."):
         patient_name = os.path.basename(gt_file).replace(".nii.gz", "")
         volumes, masks = preprocessor.run_with_config(
             image_file=image_file,
@@ -96,8 +97,9 @@ def inference(
             config_name=IMAGE_TYPE.ABDOMEN_SOFT_TISSUES_ABDOMEN_LIVER,
         )
         predict_volume = []
-        for idx in range(volumes.shape[0]):
-            img = volumes[idx, ...]
+        for idx in tqdm(range(volumes.shape[0]), desc="Inference frame by frame...", leave=False, total=volumes.shape[0]):
+            # Grey-scale 3 channels
+            img = volumes[idx][..., None].repeat(3, -1)
             mask = masks[idx, ...]
             pred = frame_inference(
                 sam_train=sam_train,
@@ -110,6 +112,7 @@ def inference(
             pass
         # Pack all prediction into volume
         predict_volume = np.stack(predict_volume, axis=0)
+        predict_volume = predict_volume.transpose(1, 2, 0).astype(np.uint8)
 
         mask_out_path = f"{inference_save_dir}/{patient_name}.npy"
         make_directory(mask_out_path, is_file=True)

@@ -7,7 +7,7 @@ import numpy as np
 
 from scripts.datasets.constant import FLARE22_LABEL_ENUM, IMAGE_TYPE
 from scripts.tools.evaluation.loading import change_axes_of_image, load_ct_info
-from scripts.datasets.transform import TRANSFORM
+# from scripts.datasets.transform import TRANSFORM
 
 
 WINDOW_CT_CONFIG = {

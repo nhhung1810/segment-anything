@@ -100,7 +100,7 @@ if __name__ == "__main__":
     )
 
     PRED_MASK_PATH = (
-        "runs/sam-one-point-230501-012024/inference/FLARE22_Tr_0008_0000.npy"
+        "runs/sam-one-point-230501-012024/inference/FLARE22_Tr_0008.npy"
     )
 
 
