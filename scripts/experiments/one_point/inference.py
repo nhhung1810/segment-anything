@@ -1,20 +1,19 @@
-from collections import defaultdict
-from ftplib import all_errors
 import os
 from typing import List, Tuple
 import numpy as np
 from torch import Tensor
 import torch
 from tqdm import tqdm
-from scripts.datasets.constant import IMAGE_TYPE
+from scripts.datasets.constant import IMAGE_TYPE, TRAIN_NON_PROCESSED
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.sam_train import SamTrain
-from scripts.datasets.constant import VAL_METADATA, DEFAULT_DEVICE
-from scripts.datasets.flare22_one_point import FileLoader
-from scripts.utils import load_file_npz, load_img, make_directory, omit
+from scripts.datasets.constant import DEFAULT_DEVICE
+
+from scripts.tools.evaluation.loading import post_process
 from segment_anything.build_sam import sam_model_registry
 from segment_anything.modeling.sam import Sam
 from scripts.losses.loss import DiceLoss
+from argparse import ArgumentParser
 
 
 def load_model(model_path, device=DEFAULT_DEVICE) -> Sam:
@@ -89,15 +88,22 @@ def inference(
     class_num = 1
     dice_fn = DiceLoss(activation=None, reduction="none")
     preprocessor = FLARE22_Preprocess()
-    for image_file, gt_file in tqdm(zip(images, gts), total=len(images), desc="Inference for patient..."):
-        patient_name = os.path.basename(gt_file).replace(".nii.gz", "")
+    for image_file, gt_file in tqdm(
+        zip(images, gts), total=len(images), desc="Inference for patient..."
+    ):
+        # patient_name = os.path.basename(gt_file).replace(".nii.gz", "")
         volumes, masks = preprocessor.run_with_config(
             image_file=image_file,
             gt_file=gt_file,
             config_name=IMAGE_TYPE.ABDOMEN_SOFT_TISSUES_ABDOMEN_LIVER,
         )
         predict_volume = []
-        for idx in tqdm(range(volumes.shape[0]), desc="Inference frame by frame...", leave=False, total=volumes.shape[0]):
+        for idx in tqdm(
+            range(volumes.shape[0]),
+            desc="Inference frame by frame...",
+            leave=False,
+            total=volumes.shape[0],
+        ):
             # Grey-scale 3 channels
             img = volumes[idx][..., None].repeat(3, -1)
             mask = masks[idx, ...]
@@ -112,32 +118,76 @@ def inference(
             pass
         # Pack all prediction into volume
         predict_volume = np.stack(predict_volume, axis=0)
+        # new shape=[H, W, T]
         predict_volume = predict_volume.transpose(1, 2, 0).astype(np.uint8)
 
-        mask_out_path = f"{inference_save_dir}/{patient_name}.npy"
-        make_directory(mask_out_path, is_file=True)
-        np.save(mask_out_path, predict_volume)
+        # Convert file into nii.gz format for inference
+        post_process(
+            pred=predict_volume,
+            gt_file=gt_file,
+            out_dir=inference_save_dir,
+        )
+        # mask_out_path = f"{inference_save_dir}/{patient_name}.npy"
+        # make_directory(mask_out_path, is_file=True)
+        # np.save(mask_out_path, predict_volume)
 
         pass
 
 
+parser = ArgumentParser()
+parser.add_argument(
+    "-i",
+    "--input_dir",
+    type=str,
+    help="Volume image directory",
+    default=f"{TRAIN_NON_PROCESSED}/images",
+)
+parser.add_argument(
+    "-l",
+    "--label_dir",
+    type=str,
+    help="Volume label directory",
+    default=f"{TRAIN_NON_PROCESSED}/labels",
+)
+parser.add_argument(
+    "-o",
+    "--output_dir",
+    type=str,
+    help="Output directory",
+    default="runs/submission/pred",
+)
+parser.add_argument(
+    "-ckpt", "--checkpoint", type=str, help="Model checkpoint to load", default=None
+)
+
 if __name__ == "__main__":
-    file_loader = FileLoader(metadata_path=VAL_METADATA)
-    patient_data = defaultdict(list)
+    args = parser.parse_args()
     device = DEFAULT_DEVICE
-    TEST_IMAGE_PATH = "dataset/FLARE22-version1/FLARE22_LabeledCase50/images/FLARE22_Tr_0008_0000.nii.gz"
-    TEST_MASK_PATH = (
-        "dataset/FLARE22-version1/FLARE22_LabeledCase50/labels/FLARE22_Tr_0008.nii.gz"
-    )
+
     run_path = "sam-one-point-230501-012024"
-    model_path = f"runs/{run_path}/model-10.pt"
+    model_path = args.checkpoint or f"runs/{run_path}/model-10.pt"
+    print("🚀 ~ file: inference.py:173 ~ model_path:", model_path)
     model = load_model(model_path)
     sam_train = SamTrain(sam_model=model)
-    inference_save_dir = f"runs/{run_path}/inference/"
+
+    inference_save_dir = args.output_dir
+    input_dir = args.input_dir
+    label_dir = args.label_dir
+
+    images_path: List[str] = sorted(os.listdir(input_dir))
+    labels_path = [
+        os.path.join(label_dir, p.replace("_0000.nii.gz", ".nii.gz"))
+        for p in images_path
+    ]
+    images_path = [os.path.join(input_dir, p) for p in images_path]
+
+    for i, p in zip(images_path, labels_path):
+        assert os.path.exists(i)
+        assert os.path.exists(p)
 
     inference(
-        images=[TEST_IMAGE_PATH],
-        gts=[TEST_MASK_PATH],
+        images=images_path,
+        gts=labels_path,
         inference_save_dir=inference_save_dir,
         sam_train=sam_train,
     )
