@@ -1,6 +1,7 @@
+import torch
 from enum import Enum
 
-import torch
+DEFAULT_DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
 class FLARE22_LABEL_ENUM(Enum):
@@ -28,8 +29,10 @@ class IMAGE_TYPE(Enum):
 
 # Respective to root
 DATASET_ROOT = "./dataset/FLARE22-version1/"
+TRAIN_NON_PROCESSED = ".dataset/FLARE22-version1/FLARE22_LabeledCase50"
+
+# Processed data
 TRAIN_PATH = "./dataset/FLARE22-version1/TrainImageProcessed"
 TRAIN_MASK = "./dataset/FLARE22-version1/TrainMask"
 TRAIN_METADATA = "./dataset/FLARE22-version1/train_metadata.json"
 VAL_METADATA = "./dataset/FLARE22-version1/val_metadata.json"
-DEFAULT_DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
