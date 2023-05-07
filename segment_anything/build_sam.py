@@ -8,7 +8,13 @@ import torch
 
 from functools import partial
 
-from .modeling import ImageEncoderViT, MaskDecoder, PromptEncoder, Sam, TwoWayTransformer
+from .modeling import (
+    ImageEncoderViT,
+    MaskDecoder,
+    PromptEncoder,
+    Sam,
+    TwoWayTransformer,
+)
 
 
 def build_sam_vit_h(checkpoint=None):
@@ -34,14 +40,27 @@ def build_sam_vit_l(checkpoint=None):
     )
 
 
-def build_sam_vit_b(checkpoint=None):
-    return _build_sam(
+def build_sam_vit_b(checkpoint=None, custom=None):
+    sam = _build_sam(
         encoder_embed_dim=768,
         encoder_depth=12,
         encoder_num_heads=12,
         encoder_global_attn_indexes=[2, 5, 8, 11],
         checkpoint=checkpoint,
     )
+
+    if custom:
+        incompatible_keys = sam.load_state_dict(torch.load(custom), strict=False)
+        assert (
+            len(incompatible_keys.unexpected_keys) == 0
+        ), f"Incompatible keys: {incompatible_keys}"
+
+        for key in list(incompatible_keys.missing_keys):
+            assert key.startswith(
+                "image_encoder."
+            ), f"Wrong missing keys: {incompatible_keys}"
+            pass
+    return sam
 
 
 sam_model_registry = {
@@ -88,7 +107,7 @@ def _build_sam(
             num_multimask_outputs=3,
             transformer=TwoWayTransformer(
                 depth=2,
-                embedding_dim=prompt_embed_dim, # 256
+                embedding_dim=prompt_embed_dim,  # 256
                 mlp_dim=2048,
                 num_heads=8,
             ),

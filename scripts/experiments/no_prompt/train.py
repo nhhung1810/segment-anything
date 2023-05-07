@@ -3,23 +3,21 @@
 """
 @Time   : 2022-05-12
 @Author : nhhung1810
-@File   : train_orig.py
+@File   : train.py
 
-NOTE:
-This is a refactored version of models/ARMN/train.py.
 """
 import os
 import sys
+import random
+import numpy as np
 from datetime import datetime
 from loguru import logger
 from typing import Tuple
-import loguru
+from copy import deepcopy
 from sacred import Experiment
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
-from sympy import FlagError
 from torch import Tensor
-from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import StepLR
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
@@ -28,14 +26,16 @@ from tqdm import tqdm
 import torch
 
 # Internal
-from scripts.train.flare22_loader import FLARE22
-from scripts.train.loss import MultimaskSamLoss
-from scripts.train.sam_train import SamTrain
+from scripts.datasets.flare22_loader import FLARE22
+from scripts.losses.loss import evaluate
+from scripts.losses.loss import MultimaskSamLoss
+from scripts.sam_train import SamTrain
 from scripts.utils import summary
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 
-NAME = "sam_simple_obj_train"
+IS_DEBUG = False
+NAME = "sam-fix-iou"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -46,16 +46,24 @@ logger.add(
     format="\n<lvl>[{time:DD:MMM:YY HH:mm:ss}] - [{level}] - {message}</lvl>",
 )
 
+# Reproducibility
+
+torch.manual_seed(0)
+random.seed(0)
+np.random.seed(0)
+
 
 @ex.config
 def config():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # NOTE: the effective batch-size will = batch_size * gradient_accumulation_step
-    batch_size = 4
+    batch_size = 32
     logdir = f"runs/{NAME}-{TIME}"
     resume_iteration = None
     n_epochs = 100
+    save_epoch = 20
+    evaluate_epoch = 20
 
     # NOTE
     gradient_accumulation_step = 1
@@ -63,15 +71,10 @@ def config():
     # Model params
     focal_gamma = 2.0
     focal_alpha = None
-    # label_smoothing = 0.1
-    # sequence_length = 327680
-    # model_complexity = 16
-    # model_complexity_lstm = 16
-    # validation_length = sequence_length
 
     # Optim params
-    learning_rate = 6e-4
-    learning_rate_decay_steps = 10000 * gradient_accumulation_step
+    learning_rate = 6e-6
+    learning_rate_decay_steps = 10 * gradient_accumulation_step
     learning_rate_decay_rate = 0.98
     clip_gradient_norm = 3
 
@@ -80,13 +83,22 @@ def config():
 
 
 @ex.capture
-def make_dataset(batch_size) -> Tuple[FLARE22, DataLoader]:
-    FLARE22.LIMIT = 20
-    dataset = FLARE22(is_debug=True, is_save_gpu=False)
+def make_dataset(device, batch_size) -> Tuple[FLARE22, DataLoader]:
+    # Save GPU by host the dataset on cpu only
+    dataset = FLARE22(is_debug=IS_DEBUG, device=device)
     dataset.preprocess()
+    dataset.preload(strict=False)
     dataset.self_check()
     loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
-    return loader
+
+    # Make sure that the evaluation dataset also work
+    _ = FLARE22(
+        metadata_path="dataset/FLARE22-version1/val_metadata.json",
+        cache_name="simple-dataset/validation",
+        is_debug=IS_DEBUG,
+        device="cpu",
+    ).preprocess()
+    return dataset, loader
 
 
 @ex.capture
@@ -108,19 +120,9 @@ def make_model(
     model.to(device=device)
 
     if resume_iteration is None:
-        logger.warning("Fresh-new model is initialized")
+        logger.warning("Initialize from pre-train")
         optimizer = torch.optim.Adam(model.parameters(), learning_rate)
         resume_iteration = 0
-    # else:
-    #     model_path = os.path.join(logdir, f"model-{resume_iteration}.pt")
-    #     logger.success(f"Load pre-trained model at {model_path}")
-    #     model.load_state_dict(torch.load(model_path))
-    #     optimizer = torch.optim.Adam(model.parameters(), learning_rate)
-
-    # if isinstance(label_smoothing, float):
-    #     model.criterion = torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    #     logger.success(f"Enable label smoothing of {label_smoothing}")
-    #     pass
 
     logger.info("Pretty print")
     summary(model)
@@ -135,7 +137,35 @@ def make_model(
         reduction="mean", focal_alpha=focal_alpha, focal_gamma=focal_gamma
     )
 
+    loss_fnc.to(device=device)
+
     return sam_train, optimizer, scheduler, loss_fnc
+
+
+def checkpoint(model: Sam, device: str, save_path: str):
+    model.to("cpu")
+    state_dict = deepcopy(model.state_dict())
+    # Remove image_encoder for lighter weight
+    for key in list(state_dict.keys()):
+        if not key.startswith("image_encoder."):
+            continue
+        del state_dict[key]
+    torch.save(state_dict, save_path)
+    model.to(device)
+
+    pass
+
+
+@ex.capture
+def run_evaluate(sam_train: SamTrain, device: str, batch_size: int) -> dict:
+    dataset = FLARE22(
+        metadata_path="dataset/FLARE22-version1/val_metadata.json",
+        cache_name="simple-dataset/validation",
+        is_debug=IS_DEBUG,
+        device=device,
+    )
+    dataset.preload()
+    return evaluate(sam_train, dataset, batch_size=batch_size // 2)
 
 
 @ex.automain
@@ -143,6 +173,8 @@ def train(
     logdir,
     device,
     n_epochs,
+    save_epoch,
+    evaluate_epoch,
     clip_gradient_norm,
     gradient_accumulation_step,
 ):
@@ -150,30 +182,36 @@ def train(
     os.makedirs(logdir, exist_ok=True)
     writer = SummaryWriter(logdir)
 
-    loader = make_dataset()
+    train_dataset, loader = make_dataset()
     sam_train, optimizer, scheduler, loss_fnc = make_model()
 
     assert isinstance(sam_train, SamTrain), ""
+    assert isinstance(train_dataset, FLARE22), ""
     assert isinstance(optimizer, Optimizer), ""
     assert isinstance(scheduler, StepLR), ""
     assert isinstance(loss_fnc, MultimaskSamLoss), ""
 
     optimizer.zero_grad()
-    loop = tqdm(range(0, n_epochs), total=n_epochs, desc="Training...")
-    for i in loop:
-        for batch in tqdm(loader, desc=f"Epoch {i}", leave=False):
+    sam_train.model.train()
+    loop = tqdm(range(1, n_epochs + 1), total=n_epochs, desc="Training...")
+    input_size, original_size = train_dataset.get_size()
+    for batch_idx in loop:
+        one_batch_losses = []
+        for idx, batch in tqdm(
+            enumerate(loader), desc=f"Epoch {batch_idx}", leave=False
+        ):
             img_emb: Tensor = batch["img_emb"]
             mask: Tensor = batch["mask"]
-            input_size = batch["input_size"]
-            original_size = batch["original_size"]
+
             masks_pred, iou_pred, _ = sam_train.predict_torch(
                 image_emb=img_emb,
-                input_size=(input_size[0, 0], input_size[0, 1]),
-                original_size=(original_size[0, 0], original_size[0, 1]),
+                input_size=input_size,
+                original_size=original_size,
                 multimask_output=True,
                 return_logits=True,
             )
 
+            # Make 3 mask for 3 multi-mask of model
             mask = mask.unsqueeze(1).repeat_interleave(3, dim=1).type(torch.int64)
 
             loss = loss_fnc.forward(
@@ -182,19 +220,48 @@ def train(
                 multi_mask_target=mask,
             )
 
+            # Before doing anything, we have to record the actual loss
+            one_batch_losses.append(loss.detach().cpu().numpy())
             # Normalize loss
             loss: Tensor = loss / gradient_accumulation_step
             loss.backward()
 
             # This will update the gradient at once
-            if i % gradient_accumulation_step == 0:
+            if idx % gradient_accumulation_step == 0:
                 optimizer.step()
-                scheduler.step()
                 # NOTE: clear the gradient
                 optimizer.zero_grad()
 
-            #  This will prevent the gradient from explosion
-            if clip_gradient_norm:
-                clip_grad_norm_(sam_train.model.parameters(), clip_gradient_norm)
+            pass
 
-            writer.add_scalar("train/loss", loss.item(), global_step=i)
+        # Loss by batch
+        writer.add_scalar(
+            "train/loss", np.array(one_batch_losses).mean(), global_step=batch_idx
+        )
+        writer.add_scalar(
+            "train/learning_rate", scheduler.get_last_lr()[0], global_step=batch_idx
+        )
+
+        # End 1 epoch
+        # LR-scheduler run by epoch
+        scheduler.step()
+        pass
+
+        # The idx from the above loop will be leak out of scope, this is python feat.
+        if idx % gradient_accumulation_step != 0:
+            # Run backward if there some gradient left
+            optimizer.step()
+            optimizer.zero_grad()
+            pass
+
+        if batch_idx % evaluate_epoch == 0:
+            # offload_gpu(dataset=train_dataset)
+            metrics: dict = run_evaluate(sam_train=sam_train)
+            for k, v in metrics.items():
+                writer.add_scalar(f"validation/{k}", v, global_step=batch_idx)
+            pass
+
+        if batch_idx % save_epoch == 0:
+            model_path = os.path.join(logdir, f"model-{batch_idx}.pt")
+            checkpoint(sam_train.model, device, model_path)
+            pass

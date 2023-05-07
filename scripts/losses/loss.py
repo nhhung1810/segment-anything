@@ -151,6 +151,29 @@ class DiceLoss(nn.Module):
         if self.reduction == "mean":
             return dice.mean()
 
+    def run_on_batch(self, input: Tensor, target: Tensor, smooth=1):
+        _reduction = self.reduction
+
+        self.reduction = "none"
+        batch_size, n, h, w = input.shape
+        input = input.contiguous().view(batch_size * n, h, w)
+        target = target.contiguous().view(batch_size * n, h, w)
+
+        loss = self.forward(input, target, smooth)
+        loss = loss.contiguous().view(batch_size, n)
+
+        if self.reduction == "none":
+            return loss
+
+        if self.reduction == "sum":
+            return loss.sum()
+
+        if self.reduction == "mean":
+            return loss.mean()
+
+        self.reduction = _reduction
+        return loss
+
 
 class IoULoss(nn.Module):
     def __init__(self, activation: nn.Sigmoid = None, reduction: str = "none"):
@@ -177,19 +200,44 @@ class IoULoss(nn.Module):
         target = target.view(target.shape[0], -1)
 
         intersection = (input * target).sum(dim=1)
-        dice = (2.0 * intersection + smooth) / (
+        iou = (intersection + smooth) / (
             input.sum(dim=1) + target.sum(dim=1) - intersection + smooth
         )
-        dice = 1 - dice
+
+        # NOTE: loss need negative number
+        iou = 1 - iou
 
         if self.reduction == "none":
-            return dice
+            return iou
 
         if self.reduction == "sum":
-            return dice.sum()
+            return iou.sum()
 
         if self.reduction == "mean":
-            return dice.mean()
+            return iou.mean()
+
+    def run_on_batch(self, input: Tensor, target: Tensor, smooth=1):
+        _reduction = self.reduction
+
+        self.reduction = "none"
+        batch_size, n, h, w = input.shape
+        input = input.contiguous().view(batch_size * n, h, w)
+        target = target.contiguous().view(batch_size * n, h, w)
+
+        loss = self.forward(input, target, smooth)
+        loss = loss.contiguous().view(batch_size, n)
+
+        if self.reduction == "none":
+            return loss
+
+        if self.reduction == "sum":
+            return loss.sum()
+
+        if self.reduction == "mean":
+            return loss.mean()
+
+        self.reduction = _reduction
+        return loss
 
 
 class MeanSquareError(nn.Module):
@@ -243,6 +291,7 @@ class SamLoss(nn.Module):
         iou_target = self.iou(mask_pred, mask_target)
         iou_mse_loss = self.mse(iou_pred, iou_target)
 
+        # Dice is a positive
         final_loss = focal_loss * 20 + dice_loss + iou_mse_loss
         return final_loss
 

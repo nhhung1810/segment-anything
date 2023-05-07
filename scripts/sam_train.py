@@ -1,13 +1,6 @@
 from typing import Optional, Tuple
 
 from tqdm import tqdm
-from scripts.train.loss import (
-    BinaryFocalLoss,
-    DiceLoss,
-    FocalLoss,
-    MultimaskSamLoss,
-    SamLoss,
-)
 from scripts.utils import GROUP2, get_data_paths, load_file_npz, load_img
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
@@ -20,6 +13,10 @@ from segment_anything.utils.transforms import ResizeLongestSide
 
 
 class SamTrain:
+    """A wrapper around SAM, like the SamPredictor,
+    to make the training become more simple
+    """
+
     def __init__(
         self,
         sam_model: Sam,
@@ -27,6 +24,54 @@ class SamTrain:
         super().__init__()
         self.model = sam_model
         self.transform = ResizeLongestSide(sam_model.image_encoder.img_size)
+
+    def predict_torch(
+        self,
+        # Image emb.
+        image_emb: Tensor,
+        input_size: Tuple[int, ...],
+        original_size: Tuple[int, ...],
+        # Prompt.
+        point_coords: Optional[Tensor] = None,
+        point_labels: Optional[Tensor] = None,
+        boxes: Optional[Tensor] = None,
+        mask_input: Optional[Tensor] = None,
+        # Output option
+        multimask_output: bool = True,
+        return_logits: bool = False,
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        """
+        Check the original source at segment_anything/predictor for more info
+        """
+
+        if point_coords is not None:
+            points = (point_coords, point_labels)
+        else:
+            points = None
+
+        # Embed prompts
+        sparse_embeddings, dense_embeddings = self.model.prompt_encoder(
+            points=points,
+            boxes=boxes,
+            masks=mask_input,
+        )
+        # dense_embeddings = dense_embeddings[:1, ...]
+        # Predict masks
+        low_res_masks, iou_predictions = self.model.mask_decoder(
+            image_embeddings=image_emb,
+            image_pe=self.model.prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            multimask_output=multimask_output,
+        )
+
+        # Upscale the masks to the original image resolution
+        masks = self.model.postprocess_masks(low_res_masks, input_size, original_size)
+
+        if not return_logits:
+            masks = masks > self.model.mask_threshold
+
+        return masks, iou_predictions, low_res_masks
 
     def prepare_img(
         self,
@@ -61,6 +106,30 @@ class SamTrain:
         )
         return img_emb, original_size, input_size
 
+    def prepare_prompt(
+        self,
+        original_size: Tuple[int, ...],
+        point_coords: Optional[np.ndarray] = None,
+        point_labels: Optional[np.ndarray] = None,
+        box: Optional[np.ndarray] = None,
+        mask_input: Optional[np.ndarray] = None,
+    ):
+        # Transform input prompts
+        coords_torch, labels_torch, box_torch, mask_input_torch = None, None, None, None
+
+        if point_coords is not None:
+            coords_torch, labels_torch = self._prepare_point(
+                original_size, point_labels, point_coords
+            )
+
+        if box is not None:
+            box_torch = self._prepare_box(box, original_size)
+
+        if mask_input is not None:
+            mask_input_torch = self._prepare_mask_input(mask_input)
+
+        return coords_torch, labels_torch, box_torch, mask_input_torch
+
     @torch.no_grad()
     def _calculate_emb(
         self,
@@ -90,30 +159,6 @@ class SamTrain:
         img_emb = self.model.image_encoder(input_image)
         return img_emb, original_size, input_size
 
-    def prepare_prompt(
-        self,
-        original_size: Tuple[int, ...],
-        point_coords: Optional[np.ndarray] = None,
-        point_labels: Optional[np.ndarray] = None,
-        box: Optional[np.ndarray] = None,
-        mask_input: Optional[np.ndarray] = None,
-    ):
-        # Transform input prompts
-        coords_torch, labels_torch, box_torch, mask_input_torch = None, None, None, None
-
-        if point_coords is not None:
-            coords_torch, labels_torch = self._prepare_point(
-                original_size, point_labels, point_coords
-            )
-
-        if box is not None:
-            box_torch = self._prepare_box(box, original_size)
-
-        if mask_input is not None:
-            mask_input_torch = self._prepare_mask_input(mask_input)
-
-        return coords_torch, labels_torch, box_torch, mask_input_torch
-
     def _prepare_mask_input(self, mask_input):
         mask_input_torch = torch.as_tensor(
             mask_input, dtype=torch.float, device=self.device
@@ -139,61 +184,14 @@ class SamTrain:
         labels_torch = torch.as_tensor(
             point_labels, dtype=torch.int, device=self.device
         )
-        coords_torch, labels_torch = coords_torch[None, :, :], labels_torch[None, :]
+        coords_torch = coords_torch.view(-1, *coords_torch.shape[-2:])
+        labels_torch = labels_torch.view(-1, *labels_torch.shape[-1:])
 
         return coords_torch, labels_torch
 
     @property
     def device(self) -> torch.device:
         return self.model.device
-
-    def predict_torch(
-        self,
-        # Image emb.
-        image_emb: Tensor,
-        input_size: Tuple[int, ...],
-        original_size: Tuple[int, ...],
-        # Prompt.
-        point_coords: Optional[Tensor] = None,
-        point_labels: Optional[Tensor] = None,
-        boxes: Optional[Tensor] = None,
-        mask_input: Optional[Tensor] = None,
-        # Output option
-        multimask_output: bool = True,
-        return_logits: bool = False,
-    ) -> Tuple[Tensor, Tensor, Tensor]:
-        """
-        Check the original source at segment_anything/predictor for more info
-        """
-
-        if point_coords is not None:
-            points = (point_coords, point_labels)
-        else:
-            points = None
-
-        # Embed prompts
-        sparse_embeddings, dense_embeddings = self.model.prompt_encoder(
-            points=points,
-            boxes=boxes,
-            masks=mask_input,
-        )
-
-        # Predict masks
-        low_res_masks, iou_predictions = self.model.mask_decoder(
-            image_embeddings=image_emb,
-            image_pe=self.model.prompt_encoder.get_dense_pe(),
-            sparse_prompt_embeddings=sparse_embeddings,
-            dense_prompt_embeddings=dense_embeddings,
-            multimask_output=multimask_output,
-        )
-
-        # Upscale the masks to the original image resolution
-        masks = self.model.postprocess_masks(low_res_masks, input_size, original_size)
-
-        if not return_logits:
-            masks = masks > self.model.mask_threshold
-
-        return masks, iou_predictions, low_res_masks
 
 
 def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> Sam:
@@ -230,5 +228,4 @@ def load_batch_emb(path):
 
 
 if __name__ == "__main__":
-
     pass

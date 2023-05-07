@@ -1,4 +1,6 @@
+from copy import deepcopy
 import itertools
+import os
 import sys
 from functools import reduce
 from typing import Dict, List
@@ -10,6 +12,9 @@ from torch.nn.modules.module import _addindent
 import torchvision.transforms as T
 import torch
 
+from segment_anything.modeling.sam import Sam
+from segment_anything.build_sam import sam_model_registry
+
 
 def resize(im: np.ndarray, target_size=[256, 256]):
     assert im.ndim <= 3, ""
@@ -19,18 +24,31 @@ def resize(im: np.ndarray, target_size=[256, 256]):
     [w, h] = target_size
     return T.Resize(size=(w, h))(_im)
 
-
-def make_nested_dir(directory: str) -> str:
-    """Make nested Directory
+def make_directory(path:str, is_file : bool = False):
+    """Make nest directory from path.
 
     Args:
-        directory (str): Path to directory
+        path (str): target path
+        is_file (bool, optional): if True, omit the file 
+            component and make directory. Defaults to False.
+    """    
 
-    Returns:
-        str: Path to that directory
-    """
-    Path(directory).mkdir(parents=True, exist_ok=True)
-    return directory
+    def make_nested_dir(directory: str) -> str:
+        """Make nested Directory
+
+        Args:
+            directory (str): Path to directory
+
+        Returns:
+            str: Path to that directory
+        """
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        return directory
+    
+    if is_file:
+        return make_nested_dir(os.path.dirname(path))
+    
+    return make_nested_dir(path)
 
 
 GROUP1 = "FLARE22_Tr_0001_0000_abdomen-soft tissues_abdomen-liver"
@@ -65,13 +83,6 @@ def generate_grid(w, h, est_n_point=16):
     samples = np.array(list(itertools.product(w_axis, h_axis))).astype(np.int32)
     labels = np.ones(n_axis_sampling**2)
     return samples, labels
-
-
-def mask_out(mask, xmin, xmax, ymin, ymax, to_value):
-    _mask = np.ones(mask.shape) == 1.0
-    _mask[xmin:xmax, ymin:ymax] = False
-    mask[_mask] = to_value
-    return mask
 
 
 def pick(d: Dict[object, object], keys: List[object]):
@@ -126,3 +137,24 @@ def summary(model, file=sys.stdout):
         file.flush()
 
     return count
+
+
+def extract_non_image_encoder(model_path: str, save_path: str, model_type: str = 'vit_b'):
+    if isinstance(torch.load(model_path), Sam):
+        torch.save(torch.load(model_path).state_dict(), model_path)
+        pass
+    model: Sam = sam_model_registry[model_type](checkpoint=model_path)
+    state_dict = deepcopy(model.state_dict())
+    for key in list(state_dict.keys()):
+        if not key.startswith("image_encoder."):
+            continue
+        del state_dict[key]
+    torch.save(state_dict, save_path)
+    pass
+
+
+if __name__ == "__main__":
+    files = list(glob.glob("./runs/sam_simple_obj_train-230426-095207/*pt"))
+    for file in files:
+        extract_non_image_encoder(file, file)
+    pass

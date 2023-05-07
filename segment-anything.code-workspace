@@ -2,9 +2,16 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../ivos/"
 		}
 	],
 	"settings": {
-  		"python.defaultInterpreterPath": "/Users/hung.nh/miniconda3/envs/fbrs",
+		"python.defaultInterpreterPath": "/Users/hung.nh/miniconda3/envs/fbrs",
+		"[python]": {
+			"editor.defaultFormatter": "ms-python.black-formatter"
+		},
+		"python.formatting.provider": "none",
 	}
 }

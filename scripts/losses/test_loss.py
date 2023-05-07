@@ -1,5 +1,5 @@
-from scripts.train.loss import BinaryFocalLoss, DiceLoss, MultimaskSamLoss, SamLoss
-from scripts.train.sam_train import SamTrain, load_model
+from scripts.losses.loss import BinaryFocalLoss, DiceLoss, MultimaskSamLoss, SamLoss
+from scripts.sam_train import SamTrain, load_model
 
 import torch
 from torch import Tensor
@@ -104,7 +104,7 @@ def test_sam_multi_mask_loss():
     _l1.mean().backward()
     # Gradient start to flow here
 
-    # 
+    #
 
     target = _target[None].repeat_interleave(3, 0)[None].repeat_interleave(1, 0)
     pred = masks_pred.repeat_interleave(1, 0)

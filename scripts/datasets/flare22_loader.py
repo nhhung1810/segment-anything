@@ -4,42 +4,24 @@ from tqdm import tqdm
 import numpy as np
 import os
 import torch
-from enum import Enum
+from scripts.datasets.constant import (
+    DATASET_ROOT,
+    IMAGE_TYPE,
+    FLARE22_LABEL_ENUM,
+    TRAIN_METADATA,
+)
 from typing import Dict, List, Optional
 from torch.utils.data import Dataset, DataLoader
-from scripts.train.sam_train import SamTrain
+from scripts.sam_train import SamTrain
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
-from scripts.utils import load_file_npz, load_img, make_nested_dir, omit, pick
-
-# Respective to root
-DATASET_ROOT = "./dataset/FLARE22-version1/"
-TRAIN_PATH = "./dataset/FLARE22-version1/TrainImageProcessed"
-TRAIN_MASK = "./dataset/FLARE22-version1/TrainMask"
-TRAIN_METADATA = "./dataset/FLARE22-version1/train_metadata.json"
-
-
-class FLARE22_LABEL_ENUM(Enum):
-    BACK_GROUND = 0
-    LIVER = 1
-    RIGHT_KIDNEY = 2
-    SPLEEN = 3
-    PANCREAS = 4
-    AORTA = 5
-    IVC = 6  # Inferior Vena Cava
-    RAG = 7  # Right Adrenal Gland,
-    LAG = 8  # Left Adrenal Gland,
-    GALLBLADDER = 9
-    ESOPHAGUS = 10
-    STOMACH = 11
-    DUODENUM = 12
-    LEFT_KIDNEY = 13
-
-
-class IMAGE_TYPE(Enum):
-    ABDOMEN_SOFT_TISSUES_ABDOMEN_LIVER = "abdomen-soft tissues_abdomen-liver"
-    CHEST_LUNGS_CHEST_MEDIASTINUM = "chest-lungs_chest-mediastinum"
-    SPINE_BONE = "spine-bone"
+from scripts.utils import (
+    load_file_npz,
+    load_img,
+    make_directory,
+    omit,
+    pick,
+)
 
 
 class FLAREElement:
@@ -87,13 +69,13 @@ class FLAREElement:
         pass
 
 
-class SinglePointObjDetectFile:
+class FileLoader:
     def __init__(
         self,
-        train_metadata_path: str = TRAIN_METADATA,
+        metadata_path: str = TRAIN_METADATA,
         dataset_root: str = DATASET_ROOT,
     ) -> None:
-        with open(train_metadata_path) as out:
+        with open(metadata_path) as out:
             self.metadata = json.load(out)
         self.data: List[FLAREElement] = []
         self.dataset_root = dataset_root
@@ -113,34 +95,54 @@ class SinglePointObjDetectFile:
 
 class FLARE22(Dataset):
     # FOR DEBUG
-    LIMIT = 10
+    LIMIT = 20
 
     def __init__(
         self,
         pre_trained_sam: Sam = None,
-        train_metadata_path: str = TRAIN_METADATA,
+        metadata_path: str = TRAIN_METADATA,
         dataset_root: str = DATASET_ROOT,
-        cache_name: str = "single_point_object_detect",
+        cache_name: str = "simple-dataset/train",
         is_debug: bool = False,
-        is_save_gpu: bool = True,
+        device: str = "cpu",
     ) -> None:
         super().__init__()
         # For preprocess data
-        self.is_save_gpu = is_save_gpu
+        self.device = device
         self.pre_trained_sam = pre_trained_sam
         if pre_trained_sam:
             self.pre_trained_sam.eval()
             self.train_sam = SamTrain(self.pre_trained_sam)
         self.dataset_root = dataset_root
 
-        self.file = SinglePointObjDetectFile(
-            train_metadata_path=train_metadata_path, dataset_root=dataset_root
-        )
+        self.file = FileLoader(metadata_path=metadata_path, dataset_root=dataset_root)
         if is_debug:
             self.file.data = self.file.data[: self.LIMIT]
         self.cache_path = os.path.join(self.dataset_root, cache_name)
-        make_nested_dir(self.cache_path)
+        make_directory(self.cache_path)
         self.dataset = []
+
+        self.input_size = None
+        self.original_size = None
+
+    def preload(self, strict=False):
+        if len(self.dataset) > 0:
+            return
+        for data in tqdm(
+            self.file.data, desc="Preload data to RAM", total=len(self.file.data)
+        ):
+            cache_path = os.path.join(
+                self.cache_path, f"{data['name']}", f"{data['id_number']}.pt"
+            )
+            if os.path.exists(cache_path):
+                # Load the existed cached
+                data_dict = torch.load(cache_path)
+                self.load_data_dict_into_dataset(data_dict)
+                continue
+
+            if strict:
+                raise FileNotFoundError(f"Can not found cache data: {cache_path}")
+        pass
 
     def preprocess(self):
         """Efficient caching and broadcast cache into pair of embedding-mask"""
@@ -148,27 +150,27 @@ class FLARE22(Dataset):
             return
         # All data, sometime it has invalid mask for a target -> discard it
         for data in tqdm(
-            self.file.data, desc="Preprocessing embedding", total=len(self.file.data)
+            self.file.data,
+            desc="Preprocessing/Checking embedding",
+            total=len(self.file.data),
         ):
-            cache_dir = os.path.join(self.cache_path, f"{data['name']}")
-            make_nested_dir(cache_dir)
-            cache_path = os.path.join(cache_dir, f"{data['id_number']}.pt")
+            cache_path = os.path.join(
+                self.cache_path, f"{data['name']}", f"{data['id_number']}.pt"
+            )
             if os.path.exists(cache_path):
-                # Load the existed cached
-                data_dict = torch.load(cache_path)
-                self.load_data_dict_into_dataset(data_dict)
                 continue
+            _ = make_directory(cache_path, is_file=True)
 
             # If don't have the data dict for this img -> create it
             masks = load_file_npz(data["mask_path"])
-            # If only contain BG -> skip
-            if masks.max() == FLARE22_LABEL_ENUM.BACK_GROUND.value:
+            if self._is_valid_mask(masks):
                 continue
             # Calculate the embedding
             img = load_img(data["img_path"])
             assert self.train_sam is not None, "Preprocess require the train-sam module"
             img_emb, original_size, input_size = self.train_sam.prepare_img(image=img)
-            # For each mask -> cache mask
+
+            # Cache embedding and mask
             data_dict = {
                 "img_emb": img_emb,
                 "original_size": torch.as_tensor(original_size),
@@ -177,22 +179,46 @@ class FLARE22(Dataset):
 
             for _cls_value in np.unique(masks):
                 data_dict[_cls_value] = torch.as_tensor(masks == _cls_value)
-            pass
+                pass
             data_dict["n_masks"] = np.unique(masks).shape[0]
             torch.save(data_dict, cache_path)
-            if self.is_save_gpu:
-                self.load_data_dict_into_dataset(data_dict)
-                torch.cuda.empty_cache()
+            # self.load_data_dict_into_dataset(data_dict)
         pass
+
+    def _is_valid_mask(self, masks):
+        """Filter out bad mask"""
+        return masks.max() == FLARE22_LABEL_ENUM.BACK_GROUND.value
 
     def load_data_dict_into_dataset(self, data_dict):
         # Separate into emb and mask
         _emb = pick(data_dict, ["img_emb", "original_size", "input_size", "n_masks"])
         _masks = omit(data_dict, ["img_emb", "original_size", "input_size", "n_masks"])
 
+        if self.input_size is None:
+            self.input_size = _emb["input_size"]
+        if self.original_size is None:
+            self.original_size = _emb["original_size"]
+        self._assert_equal(_emb)
+
         # Append into dataset
         for _, v in _masks.items():
             self.dataset.append({**_emb, "mask": v})
+        pass
+
+    def _assert_equal(self, d):
+        assert (
+            self.input_size[0] == d["input_size"][0]
+        ), f"Inconsistent input size: stored {self.input_size} but got {d['input_size']}"
+        assert (
+            self.input_size[1] == d["input_size"][1]
+        ), f"Inconsistent Input size: stored {self.input_size} but got {d['input_size']}"
+
+        assert (
+            self.original_size[0] == d["original_size"][0]
+        ), f"Inconsistent Original size: stored {self.original_size} but got {d['original_size']}"
+        assert (
+            self.original_size[1] == d["original_size"][1]
+        ), f"Inconsistent Original size: stored {self.original_size} but got {d['original_size']}"
         pass
 
     def self_check(self):
@@ -222,19 +248,20 @@ class FLARE22(Dataset):
 
         # Remove the batch element
         img_emb = data["img_emb"][0]
-        original_size = torch.as_tensor(data["original_size"])
-        input_size = torch.as_tensor(data["input_size"])
         mask = data["mask"]
 
         return dict(
-            img_emb=img_emb,
-            original_size=original_size,
-            input_size=input_size,
-            mask=mask,
+            img_emb=img_emb.to(self.device),
+            mask=mask.to(self.device),
         )
 
     def __len__(self):
         return len(self.dataset)
+
+    def get_size(self):
+        input_size = (self.input_size[0], self.input_size[1])
+        original_size = (self.original_size[0], self.original_size[1])
+        return input_size, original_size
 
 
 def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> Sam:
@@ -244,8 +271,9 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 
 if __name__ == "__main__":
     sam = load_model()
+    # sam.to("cuda:0")
     FLARE22.LIMIT = 20
-    dataset = FLARE22(is_debug=True, is_save_gpu=False)
+    dataset = FLARE22(is_debug=False, pre_trained_sam=sam)
     dataset.preprocess()
     print(len(dataset))
     loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
