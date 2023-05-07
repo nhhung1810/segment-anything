@@ -148,11 +148,10 @@ class FLARE22_SimpleMaskPropagate(Dataset):
         img_emb = data["img_emb"][0]
         mask = data["mask"]
         previous_mask = data["previous_mask"]
-
         return dict(
             img_emb=img_emb.to(self.device),
             mask=mask.to(self.device),
-            previous_mask=previous_mask.to(self.device),
+            previous_mask=previous_mask.to(self.device)
         )
 
     def __len__(self):
@@ -170,23 +169,23 @@ class FLARE22_SimpleMaskPropagate(Dataset):
             self.file.data, desc="Preload data to RAM", total=len(self.file.data)
         ):
             current_id = int(data["id_number"])
+            previous_id = current_id - 1
+
             current_cache_path = os.path.join(
                 self.cache_path,
                 f"{data['name']}/{current_id}.pt",
             )
+            previous_cache_path = os.path.join(
+                    self.cache_path, f"{data['name']}/{previous_id}.pt"
+                )
 
             if not os.path.exists(current_cache_path):
                 continue
+            if not os.path.exists(previous_cache_path):
+                continue
 
             current_data_dict = torch.load(current_cache_path)
-            try:
-                previous_id = current_id - 1
-                previous_cache_path = os.path.join(
-                    self.cache_path, f"{data['name']}/{previous_id}"
-                )
-                previous_data_dict: dict = torch.load(previous_cache_path)
-            except Exception:
-                previous_data_dict = None
+            previous_data_dict = torch.load(previous_cache_path)
 
             self.load_data_dict_into_dataset(current_data_dict, previous_data_dict)
 
@@ -251,7 +250,7 @@ class FLARE22_SimpleMaskPropagate(Dataset):
         """Filter out bad mask"""
         return masks.max() == FLARE22_LABEL_ENUM.BACK_GROUND.value
 
-    def load_data_dict_into_dataset(self, data_dict, previous_data_dict=None):
+    def load_data_dict_into_dataset(self, data_dict, previous_data_dict):
         # Separate into emb and mask
         embedding = pick(data_dict, ["img_emb"])
         masks = omit(data_dict, ["img_emb", "original_size", "input_size", "n_masks"])
@@ -270,7 +269,9 @@ class FLARE22_SimpleMaskPropagate(Dataset):
             previous_data_dict, ["img_emb", "original_size", "input_size", "n_masks"]
         )
         for class_number, mask in masks.items():
-            previous_mask = previous_masks.get(class_number, None)
+            previous_mask = previous_masks.get(class_number, {}).get('mask', None)
+            # If there are no previous mask -> abort
+            if previous_mask is None: continue
             self.dataset.append(
                 {**embedding, "mask": mask["mask"], "previous_mask": previous_mask}
             )
@@ -324,10 +325,9 @@ if __name__ == "__main__":
     dataset.preload()
     print(len(dataset))
     loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
-    for batch in loader:
+    for idx, batch in enumerate(loader):
         for k, v in batch.items():
             print(f"{k} : {v.shape}")
-            pass
-        break
-
+            if idx == 10: 
+                break
     pass
