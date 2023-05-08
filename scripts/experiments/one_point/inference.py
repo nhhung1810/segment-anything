@@ -10,6 +10,7 @@ from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 
 from scripts.tools.evaluation.loading import post_process
+from scripts.utils import make_directory
 from segment_anything.build_sam import sam_model_registry
 from segment_anything.modeling.sam import Sam
 from scripts.losses.loss import DiceLoss
@@ -28,6 +29,8 @@ def make_point_from_mask(mask: Tensor) -> Tuple[Tensor, Tensor]:
     coors = torch.argwhere(mask)
     coors = coors[torch.randperm(coors.shape[0])][:1]
     labels = torch.ones(coors.shape[0], 1, 1)
+    if labels.shape[0] == 0:
+        return None, None
     return coors, labels
 
 
@@ -42,7 +45,7 @@ def frame_inference(
     mask = torch.as_tensor(mask == class_num)
 
     if mask.any():
-        coors, labels = make_point_from_mask(mask=mask == class_num)
+        coors, labels = make_point_from_mask(mask)
     else:
         coors, labels = None, None
 
@@ -83,9 +86,9 @@ def inference(
     gts: List[str],
     sam_train: SamTrain,
     inference_save_dir: str,
+    class_num: int,
 ):
     assert len(images) == len(gts)
-    class_num = 1
     dice_fn = DiceLoss(activation=None, reduction="none")
     preprocessor = FLARE22_Preprocess()
     for image_file, gt_file in tqdm(
@@ -120,6 +123,8 @@ def inference(
         predict_volume = np.stack(predict_volume, axis=0)
         # new shape=[H, W, T]
         predict_volume = predict_volume.transpose(1, 2, 0).astype(np.uint8)
+        # To correct the class number
+        predict_volume = predict_volume * class_num
 
         # Convert file into nii.gz format for inference
         post_process(
@@ -159,6 +164,9 @@ parser.add_argument(
 parser.add_argument(
     "-ckpt", "--checkpoint", type=str, help="Model checkpoint to load", default=None
 )
+parser.add_argument(
+    "-c", "--class_num", type=int, help="Class number to inference", default=2
+)
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -166,13 +174,16 @@ if __name__ == "__main__":
 
     run_path = "sam-one-point-230501-012024"
     model_path = args.checkpoint or f"runs/{run_path}/model-10.pt"
-    print("🚀 ~ file: inference.py:173 ~ model_path:", model_path)
     model = load_model(model_path)
     sam_train = SamTrain(sam_model=model)
 
     inference_save_dir = args.output_dir
     input_dir = args.input_dir
     label_dir = args.label_dir
+    class_num = args.class_num
+    print("🚀 ~ file: inference.py:173 ~ model_path:", model_path, class_num, inference_save_dir)
+    make_directory(inference_save_dir)
+    assert class_num < 14 and class_num > 0 and isinstance(class_num, int), f"Incorrect class num"
 
     images_path: List[str] = sorted(os.listdir(input_dir))
     labels_path = [
@@ -190,6 +201,7 @@ if __name__ == "__main__":
         gts=labels_path,
         inference_save_dir=inference_save_dir,
         sam_train=sam_train,
+        class_num=class_num
     )
 
     pass
