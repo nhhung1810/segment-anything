@@ -315,8 +315,8 @@ if __name__ == "__main__":
     sam.to("cuda:0")
     FLARE22_SimpleMaskPropagate.LIMIT = 20
     dataset = FLARE22_SimpleMaskPropagate(
-        cache_name=FLARE22_SimpleMaskPropagate.TRAIN_CACHE_NAME,
-        metadata_path=TRAIN_METADATA,
+        cache_name=FLARE22_SimpleMaskPropagate.VAL_CACHE_NAME,
+        metadata_path=VAL_METADATA,
         is_debug=False,
         pre_trained_sam=sam,
         device=sam.device,

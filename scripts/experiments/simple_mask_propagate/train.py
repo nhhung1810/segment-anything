@@ -29,7 +29,7 @@ from scripts.datasets.constant import TRAIN_METADATA, VAL_METADATA
 
 # Internal
 from scripts.datasets.flare22_simple_mask_propagate import FLARE22_SimpleMaskPropagate
-from scripts.experiments.one_point.eval_one_point import evaluate
+from scripts.experiments.simple_mask_propagate.evaluate import evaluate
 from scripts.losses.loss import MultimaskSamLoss
 from scripts.sam_train import SamTrain
 from scripts.utils import summary
@@ -37,7 +37,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 IS_DEBUG = False
-NAME = "sam-one-point"
+NAME = "mask-prop"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -60,16 +60,15 @@ np.random.seed(0)
 def config():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    batch_size = 32
+    batch_size = 16
 
     logdir = f"runs/{NAME}-{TIME}"
     resume_iteration = None
-    n_epochs = 10
-    save_epoch = 1
-    evaluate_epoch = 1
+    n_epochs = 100
+    save_epoch = 5
+    evaluate_epoch = 5
 
-    # NOTE: as the batch-size now reduce to 1, we have to increase acc. step
-    gradient_accumulation_step = 1
+    gradient_accumulation_step = 4
 
     # Model params
     focal_gamma = 2.0
@@ -77,7 +76,7 @@ def config():
 
     # Optim params
     learning_rate = 6e-6
-    learning_rate_decay_steps = 2
+    learning_rate_decay_steps = 5
     learning_rate_decay_rate = 0.98
 
     ex.observers.append(FileStorageObserver.create(logdir))
@@ -183,7 +182,6 @@ def train(
     save_epoch,
     evaluate_epoch,
     gradient_accumulation_step,
-    num_of_prompt_per_image,
 ):
     print_config(ex.current_run)
     os.makedirs(logdir, exist_ok=True)
@@ -227,7 +225,7 @@ def train(
             # 1 mask have to clone to fit the number of prompt
             # and the number of multiple-mask
             mask = (
-                mask.repeat_interleave(masks_pred.shape[0], dim=0)
+                mask
                 .unsqueeze(1)
                 .repeat_interleave(3, dim=1)
                 .type(torch.int64)
