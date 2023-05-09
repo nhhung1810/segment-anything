@@ -31,27 +31,29 @@ class Renderer:
 
         h, w = mask.shape[-2:]
         masks = mask.reshape(h, w)
-
         result = np.ones([h, w, 4])
-        # * color.reshape(1, 1, -1)
-        handle_legend = []
+
+        if self.legend_dict is not None:
+            handle_legend = []
         class_label_map = self.build_class_name_map(masks)
         for class_num in np.unique(masks):
             (r, b, g, _) = get_color(class_num) if class_num != 0 else (0, 0, 0, 0)
             color = (r, b, g, 0.6)
-            handle_legend.append(
-                Line2D(
-                    xdata=[0],
-                    ydata=[0],
-                    color=color,
-                    lw=2,
-                    label=f"{class_label_map[class_num]}",
+            if self.legend_dict is not None:
+                handle_legend.append(
+                    Line2D(
+                        xdata=[0],
+                        ydata=[0],
+                        color=color,
+                        lw=2,
+                        label=f"{class_label_map[class_num]}",
+                    )
                 )
-            )
             result[masks == class_num] = color
             pass
-
-        ax.legend(handles=handle_legend, bbox_to_anchor=(1.4, 1), loc="upper right")
+        
+        if self.legend_dict is not None:
+            ax.legend(handles=handle_legend, bbox_to_anchor=(1.4, 1), loc="upper right")
         ax.imshow(result)
         pass
 
@@ -181,9 +183,10 @@ class Renderer:
 
         if n <= 3:
             n_row, n_col = 1, n
-
-        n_row = int(np.floor(np.sqrt(n)))
-        n_row, n_col = n_row, n_row + 1
+        else:
+            n_row = int(np.floor(np.sqrt(n)))
+            n_row, n_col = n_row, n_row + 1
+        
         f, axes = plt.subplots(n_row, n_col, squeeze=False)
 
         return f, axes, n_row, n_col
