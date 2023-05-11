@@ -45,7 +45,7 @@ ex = Experiment(NAME)
 logger.remove()
 logger.add(
     sys.stdout,
-    format="\n<lvl>[{time:DD:MMM:YY HH:mm:ss}] - [{level}] - {message}</lvl>",
+    format="<lvl>[{time:DD:MMM:YY HH:mm:ss}] - [{level}] - {message}</lvl>",
 )
 
 
@@ -63,7 +63,7 @@ def config():
     batch_size = 16
 
     logdir = f"runs/{NAME}-{TIME}"
-    resume_iteration = None
+    custom_model_path = None
     n_epochs = 100
     save_epoch = 5
     evaluate_epoch = 5
@@ -110,28 +110,30 @@ def make_dataset(device, batch_size) -> Tuple[FLARE22_SimpleMaskPropagate, DataL
 @ex.capture
 def make_model(
     device,
-    logdir,
-    resume_iteration,
+    custom_model_path,
     learning_rate,
     learning_rate_decay_steps,
     learning_rate_decay_rate,
     focal_gamma,
     focal_alpha,
 ) -> Tuple[SamTrain, Optimizer, StepLR, int]:
-    def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> Sam:
-        sam: Sam = sam_model_registry[checkpoint_type](checkpoint=checkpoint)
+    def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b", custom_model_path:str=None) -> Sam:
+        sam: Sam = sam_model_registry[checkpoint_type](checkpoint=checkpoint, custom=custom_model_path)
         return sam
 
-    model = load_model()
+    model = load_model(custom_model_path=custom_model_path)
     model.to(device=device)
 
-    if resume_iteration is None:
+    if custom_model_path is None:
         logger.warning("Initialize from pre-train")
-        optimizer = torch.optim.Adam(model.parameters(), learning_rate)
-        resume_iteration = 0
-
-    logger.info("Pretty print")
-    summary(model)
+    else:
+        logger.success("Load custom model")
+        pass
+    
+    optimizer = torch.optim.Adam(model.parameters(), learning_rate)
+    logger.info("Model sctructure")
+    summary(model.prompt_encoder)
+    summary(model.mask_decoder)
 
     scheduler = StepLR(
         optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate
