@@ -20,6 +20,8 @@ from scripts.losses.loss import DiceLoss
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 
+from segment_anything.utils.amg import calculate_stability_score
+
 
 CACHE_DIR = f"{DATASET_ROOT}/{FLARE22_SimpleMaskPropagate.VAL_CACHE_NAME}/"
 
@@ -99,7 +101,7 @@ def frame_inference(
             original_size=original_size,
             multimask_output=True,
             # Eval need no logits
-            return_logits=False,
+            return_logits=True,
             point_coords=coords_torch,
             point_labels=labels_torch,
         )
@@ -115,9 +117,17 @@ def frame_inference(
             original_size=original_size,
             multimask_output=True,
             # Eval need no logits
-            return_logits=False,
+            return_logits=True,
             mask_input=mask_input_torch,
         )
+
+    mask_logit = mask_pred.clone()
+    mask_pred = mask_pred > sam_train.model.mask_threshold
+    stability_score = calculate_stability_score(
+        masks=mask_logit,
+        mask_threshold=sam_train.model.mask_threshold,
+        threshold_offset=1.0,
+    )
 
     # Dice loss -> take the smallest (the smaller the better)
     if dice_with == "gt":
@@ -135,8 +145,9 @@ def frame_inference(
         chosen_idx = dice.argmin()
         pass
     mask_pred = mask_pred[0, chosen_idx]
+    stability_score = stability_score[0, chosen_idx].float()
 
-    return mask_pred, dice.min().detach().item()
+    return mask_pred, dice.min().detach().item(), stability_score
 
 
 def run_prepare_img_with_cache(sam_train, img, cache_img_emb_path):
@@ -167,6 +178,7 @@ def visualize(
     mask: np.ndarray,
     pred: Tensor,
     dice_min: float,
+    stability_score: float,
 ):
     render = Renderer(None)
 
@@ -176,7 +188,7 @@ def visualize(
     render.add(img=img, mask=(mask == class_num).astype(np.uint8), title="GT").add(
         img=img,
         mask=pred.detach().cpu().numpy().astype(np.uint8),
-        title=f"Best Pred. - {dice_min:.2f}",
+        title=f"Best Pred: {dice_min:.2f} | {stability_score:.2f}",
     )
     if previous_mask is not None:
         _previous_mask = previous_mask
@@ -229,7 +241,7 @@ def inference(
                 if previous_mask == None:
                     previous_mask = (mask == class_num).astype(np.uint8)
 
-                pred, dice_min = frame_inference(
+                pred, dice_min, stability_score = frame_inference(
                     sam_train=sam_train,
                     class_num=class_num,
                     dice_fn=dice_fn,
@@ -249,6 +261,7 @@ def inference(
                     mask,
                     pred,
                     dice_min,
+                    stability_score,
                 )
 
                 previous_mask = pred
