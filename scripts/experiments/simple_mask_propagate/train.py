@@ -37,7 +37,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 IS_DEBUG = False
-NAME = "mask-prop"
+NAME = "mp-focus"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -110,6 +110,7 @@ def make_dataset(
         cache_name=FLARE22_SimpleMaskPropagate.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device="cpu",
+        class_selected=class_selected,
     ).preprocess()
     return dataset, loader
 
@@ -178,12 +179,13 @@ def checkpoint(model: Sam, device: str, save_path: str):
 
 
 @ex.capture
-def run_evaluate(sam_train: SamTrain, device: str) -> dict:
+def run_evaluate(sam_train: SamTrain, device: str, class_selected) -> dict:
     dataset = FLARE22_SimpleMaskPropagate(
         metadata_path=VAL_METADATA,
         cache_name=FLARE22_SimpleMaskPropagate.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device=device,
+        class_selected=class_selected,
     )
     dataset.preload()
     return evaluate(sam_train, dataset)
