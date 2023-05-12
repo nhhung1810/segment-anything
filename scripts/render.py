@@ -1,9 +1,10 @@
+import itertools
 from typing import Dict, List, Tuple
 from matplotlib.axes import Axes
 from matplotlib.lines import Line2D
 import numpy as np
 import matplotlib.pyplot as plt
-
+import matplotlib.patches as patches
 from scripts.datasets.color import get_color
 
 
@@ -31,27 +32,30 @@ class Renderer:
 
         h, w = mask.shape[-2:]
         masks = mask.reshape(h, w)
-
         result = np.ones([h, w, 4])
-        # * color.reshape(1, 1, -1)
-        handle_legend = []
+
+        if self.legend_dict is not None:
+            handle_legend = []
         class_label_map = self.build_class_name_map(masks)
         for class_num in np.unique(masks):
             (r, b, g, _) = get_color(class_num) if class_num != 0 else (0, 0, 0, 0)
             color = (r, b, g, 0.6)
-            handle_legend.append(
-                Line2D(
-                    xdata=[0],
-                    ydata=[0],
-                    color=color,
-                    lw=2,
-                    label=f"{class_label_map[class_num]}",
+            if self.legend_dict is not None:
+                handle_legend.append(
+                    Line2D(
+                        xdata=[0],
+                        ydata=[0],
+                        color=color,
+                        lw=2,
+                        label=f"{class_label_map[class_num]}",
+                    )
                 )
-            )
             result[masks == class_num] = color
             pass
 
-        ax.legend(handles=handle_legend, bbox_to_anchor=(1.4, 1), loc="upper right")
+        if self.legend_dict is not None:
+            ax.legend(handles=handle_legend, bbox_to_anchor=(1.5, 1), loc="upper right")
+            # ax.legend(handles=handle_legend, bbox_to_anchor=(3, 1), loc="upper right")
         ax.imshow(result)
         pass
 
@@ -71,15 +75,23 @@ class Renderer:
         img: np.ndarray,
         mask: np.ndarray,
         points: Tuple[np.ndarray, np.ndarray] = None,
+        bbox: Tuple[np.ndarray, str] = None,
         title: str = "",
     ):
         assert img is not None or mask is not None, "Both img or mask is None"
 
         _img = self._format_img(img)
         _mask = self._format_mask(mask)
+        _bbox = self._format_bbox(bbox)
 
         self.data.append(
-            {"img": _img, "mask": _mask, "points": points, "title": title or "Untitled"}
+            {
+                "img": _img,
+                "mask": _mask,
+                "points": points,
+                "title": title or "Untitled",
+                "bbox": _bbox,
+            }
         )
         return self
 
@@ -116,39 +128,56 @@ class Renderer:
             pass
         return _img
 
+    def _format_bbox(self, bbox):
+        return bbox
+
     def show_all(self, save_path: str = None):
         assert len(self.data) > 0, "There is no data to be rendered"
         f, ax, n_row, n_col = self._get_valid_subplot(len(self.data))
+        for i1, i2 in itertools.product(range(n_row), range(n_col)):
+            # for i1 in range(n_row):
+            #     for i2 in range(n_col):
+            idx = i1 * n_col + i2
+            if idx >= len(self.data):
+                break
 
-        for i1 in range(n_row):
-            for i2 in range(n_col):
-                idx = i1 * n_col + i2
-                if idx >= len(self.data):
-                    break
-
-                _data = self.data[idx]
-                if _data["img"] is not None:
-                    ax[i1, i2].imshow(_data["img"])
-                    pass
-
-                if _data["mask"] is not None:
-                    self.overlay_mask(
-                        _data["mask"], ax[i1, i2], no_overlay=_data["img"] is None
-                    )
-                    pass
-
-                if _data["points"] is not None:
-                    [pcoors, plabels] = _data["points"]
-                    self._render_point_label(
-                        ax[i1, i2], pcoors, plabels, chosen_value=1, color_str="g"
-                    )
-                    self._render_point_label(
-                        ax[i1, i2], pcoors, plabels, chosen_value=0, color_str="r"
-                    )
-                    pass
-
-                ax[i1, i2].set_title(_data["title"])
+            _data = self.data[idx]
+            if _data["img"] is not None:
+                ax[i1, i2].imshow(_data["img"])
                 pass
+
+            if _data["mask"] is not None:
+                self.overlay_mask(
+                    _data["mask"], ax[i1, i2], no_overlay=_data["img"] is None
+                )
+                pass
+
+            if _data["points"] is not None:
+                [pcoors, plabels] = _data["points"]
+                self._render_point_label(
+                    ax[i1, i2], pcoors, plabels, chosen_value=1, color_str="g"
+                )
+                self._render_point_label(
+                    ax[i1, i2], pcoors, plabels, chosen_value=0, color_str="r"
+                )
+                pass
+
+            if _data["bbox"] is not None:
+                bbox = _data["bbox"][0]
+                bbox_label = _data["bbox"][1]
+                rect = patches.Rectangle(
+                    (bbox["x"], bbox["y"]),
+                    bbox["w"],
+                    bbox["h"],
+                    linewidth=1,
+                    edgecolor="r",
+                    facecolor="none",
+                )
+                ax[i1, i2].add_patch(rect)
+                pass
+
+            ax[i1, i2].set_title(_data["title"])
+            pass
         pass
 
         if save_path:
@@ -181,9 +210,10 @@ class Renderer:
 
         if n <= 3:
             n_row, n_col = 1, n
+        else:
+            n_row = int(np.floor(np.sqrt(n)))
+            n_row, n_col = n_row, n_row + 1
 
-        n_row = int(np.floor(np.sqrt(n)))
-        n_row, n_col = n_row, n_row + 1
         f, axes = plt.subplots(n_row, n_col, squeeze=False)
 
         return f, axes, n_row, n_col

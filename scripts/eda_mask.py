@@ -1,5 +1,7 @@
 from collections import defaultdict
+import json
 import os
+from pydoc import pathdirs
 import subprocess
 from typing import List
 import natsort
@@ -36,7 +38,7 @@ def get_all_organ_range(masks):
         ends.append(end_idx)
 
     # Padding zero for background pixel
-    return np.array([0, *starts]), np.array([0, *ends])
+    return np.array([0, *starts], np.int32), np.array([0, *ends], np.int32)
 
 
 def resize_to(img: np.ndarray, target_size):
@@ -67,17 +69,19 @@ def visualize(
     images: List[str], gts: List[str], direction: str = "T", framerate: int = 10
 ):
     preprocessor = FLARE22_Preprocess()
-    render = Renderer(
-        legend_dict={
-            value.value: value.name.lower().replace("_", " ")
-            for value in FLARE22_LABEL_ENUM
-        }
-    )
+    # render = Renderer(
+    #     legend_dict={
+    #         value.value: value.name.lower().replace("_", " ")
+    #         for value in FLARE22_LABEL_ENUM
+    #     }
+    # )
+    all_area_data = {}
+    all_point_data = {}
     for image_file, gt_file in tqdm(
-        zip(images, gts), total=len(images), desc="Inference for patient..."
+        zip(images, gts), total=len(images), desc="EDA for patient..."
     ):
         patient_name = os.path.basename(image_file).replace(".nii.gz", "")
-        _dir = make_directory(f"./runs/visualize/{patient_name}")
+        area_data = defaultdict(list)
 
         # shape = [T, H, W]
         volumes, masks = preprocessor.run_with_config(
@@ -87,52 +91,46 @@ def visualize(
         )
         if direction == "T":
             pass
-        elif direction == "H":
+        elif direction == "W":
             # T, H, W = volumes.shape
             volumes = volumes.transpose(2, 0, 1)
             masks = masks.transpose(2, 0, 1)
             pass
 
         starts, ends = get_all_organ_range(masks)
+        all_point_data[patient_name] = {
+            class_num: [
+                float(starts[class_num] / volumes.shape[0]),
+                float(ends[class_num] / volumes.shape[0]),
+            ]
+            for class_num in range(1, 14)
+        }
         for idx in tqdm(
             range(volumes.shape[0]),
             desc="Frame render...",
             total=volumes.shape[0],
             leave=False,
         ):
-            # Convert into RBG
             img = volumes[idx, ...]
             mask = masks[idx, ...]
-            bboxes = calculate_bbox(mask)
-            if direction == "H":
-                target_size = (img.shape[1] // 4, img.shape[1] // 8)
-                img = resize_to(img, target_size=target_size)[..., None].repeat(
-                    3, axis=-1
-                )
-                mask = resize_to(mask.astype(np.uint8), target_size=target_size).astype(
-                    np.uint8
-                )
-            else:
-                img = img[..., None].repeat(3, axis=-1)
-                mask = mask.astype(np.uint8)
 
-            (
-                render.add(img=img, mask=None, bbox=bboxes[1], title="img")
-                .add(img=img, mask=mask, title=f"{patient_name}_{idx}")
-                .show_all(save_path=f"{_dir}/{idx:0>4}.png")
-                .reset()
-            )
+            # Calculate the area
+            image_size = img.shape[0] * img.shape[1]
+            for class_num in range(1, 14):
+                area_ratio = np.sum((mask == class_num).astype(np.float32)) / image_size
+                area_data[class_num].append(float(area_ratio))
+
             pass
-        cmd = f"""\
-        ffmpeg -y -framerate {framerate} -pattern_type glob -i "{_dir}/*.png" -c:v\
-        libx264 -pix_fmt yuv420p "{_dir}/{patient_name}-{direction}.mp4"
-        """
 
-        subprocess.run(
-            [cmd],
-            shell=True,
-        )
-        break
+        all_area_data[patient_name] = area_data
+        # break
+
+    with open(f"all_area_data-{direction}.json", "w") as out:
+        json.dump(all_area_data, out)
+
+    with open(f"all_point_data-{direction}.json", "w") as out:
+        json.dump(all_point_data, out)
+
     pass
 
 
@@ -147,7 +145,7 @@ if __name__ == "__main__":
     images_path = [os.path.join(image_dir, p) for p in images_path]
 
     framerate = 10
-    direction = "T"
+    direction = "W"
     visualize(
         images=images_path, gts=labels_path, framerate=framerate, direction=direction
     )

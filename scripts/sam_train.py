@@ -24,6 +24,7 @@ class SamTrain:
         super().__init__()
         self.model = sam_model
         self.transform = ResizeLongestSide(sam_model.image_encoder.img_size)
+        self.mask_transform = ResizeLongestSide(target_length=sam_model.image_encoder.img_size // 4)
 
     def predict_torch(
         self,
@@ -55,7 +56,13 @@ class SamTrain:
             boxes=boxes,
             masks=mask_input,
         )
-        # dense_embeddings = dense_embeddings[:1, ...]
+
+        # Force the sparse-embedding into 0.0 so that it won't affect
+        # mask-decoder
+        if sparse_embeddings.shape[1] == 0:
+            sparse_embeddings = torch.empty((1, *sparse_embeddings.shape[1:]), device=self.device)
+
+
         # Predict masks
         low_res_masks, iou_predictions = self.model.mask_decoder(
             image_embeddings=image_emb,
@@ -160,10 +167,16 @@ class SamTrain:
         return img_emb, original_size, input_size
 
     def _prepare_mask_input(self, mask_input):
+        """Formatting Mask input
+        Args:
+            mask_input (np.ndarray | torch.Tensor): shape = [batch_size, H, W]
+        """        
         mask_input_torch = torch.as_tensor(
             mask_input, dtype=torch.float, device=self.device
         )
-        mask_input_torch = mask_input_torch[None, :, :, :]
+        # Add feature dim -> [batch_size, 1, H, W]
+        mask_input_torch = mask_input_torch.unsqueeze(1)
+        mask_input_torch = self.mask_transform.apply_image_torch(mask_input_torch)
         return mask_input_torch
 
     def _prepare_box(self, box, original_size):

@@ -12,8 +12,10 @@ from tabulate import tabulate
 import pandas as pd
 from datetime import datetime
 import argparse
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser("Official evaluation code from FLARE")
+parser.add_argument("-n", "--name", type=str, help="Experiment name", default="Untitled")
 parser.add_argument("-g", "--gt_dir", type=str, help="Ground Truth directory")
 parser.add_argument("-p", "--pred_dir", type=str, help="Prediction directory")
 
@@ -26,6 +28,7 @@ df = pd.read_csv(LOG)
 def eval(args):
     seg_path = args.pred_dir
     gt_path = args.gt_dir
+    EXPERIMENT_NAME = args.name
 
     filenames = os.listdir(seg_path)
     filenames = [x for x in filenames if x.endswith(".nii.gz")]
@@ -39,7 +42,7 @@ def eval(args):
         seg_metrics["DSC_{}".format(i)] = list()
         seg_metrics["NSD-1mm_{}".format(i)] = list()
 
-    for name in filenames:
+    for name in tqdm(filenames, total=len(filenames), desc="Compute metrics on files"):
         gt_name = name.replace("_0000.nii.gz", ".nii.gz")
         if not osp.isfile(osp.join(gt_path, gt_name)):
             continue
@@ -82,10 +85,11 @@ def eval(args):
     seg_metrics["DSC_mean"].insert(0, np.mean(seg_metrics["DSC_mean"]))
     seg_metrics["NSD-1mm_mean"].insert(0, np.mean(seg_metrics["NSD-1mm_mean"]))
 
+    df_dict['Name'] = EXPERIMENT_NAME
     df_dict['DSC_mean'] = seg_metrics["DSC_mean"][0]
     df_dict['NSD-1mm_mean'] = seg_metrics["NSD-1mm_mean"][0]
 
-    for i in range(1, NUM_CLASSES + 1):
+    for i in tqdm(range(1, NUM_CLASSES + 1), desc="Logging data..."):
         seg_metrics["DSC_{}".format(i)].insert(
             0, np.mean(seg_metrics["DSC_{}".format(i)])
         )
