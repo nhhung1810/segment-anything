@@ -25,7 +25,7 @@ from loguru import logger
 from sacred import Experiment
 from sacred.commands import print_config
 from sacred.observers import FileStorageObserver
-from scripts.datasets.constant import TRAIN_METADATA, VAL_METADATA
+from scripts.datasets.constant import FLARE22_LABEL_ENUM, TRAIN_METADATA, VAL_METADATA
 
 # Internal
 from scripts.datasets.flare22_simple_mask_propagate import FLARE22_SimpleMaskPropagate
@@ -64,6 +64,10 @@ def config():
 
     logdir = f"runs/{NAME}-{TIME}"
     custom_model_path = None
+    class_selected = [
+        FLARE22_LABEL_ENUM.LIVER.value,
+        FLARE22_LABEL_ENUM.GALLBLADDER.value,
+    ]
     n_epochs = 100
     save_epoch = 5
     evaluate_epoch = 5
@@ -84,13 +88,16 @@ def config():
 
 
 @ex.capture
-def make_dataset(device, batch_size) -> Tuple[FLARE22_SimpleMaskPropagate, DataLoader]:
+def make_dataset(
+    device, batch_size, class_selected
+) -> Tuple[FLARE22_SimpleMaskPropagate, DataLoader]:
     # Save GPU by host the dataset on cpu only
     dataset = FLARE22_SimpleMaskPropagate(
         metadata_path=TRAIN_METADATA,
         cache_name=FLARE22_SimpleMaskPropagate.TRAIN_CACHE_NAME,
         is_debug=IS_DEBUG,
         device=device,
+        class_selected=class_selected,
     )
     dataset.preprocess()
     dataset.preload()
@@ -117,8 +124,14 @@ def make_model(
     focal_gamma,
     focal_alpha,
 ) -> Tuple[SamTrain, Optimizer, StepLR, int]:
-    def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b", custom_model_path:str=None) -> Sam:
-        sam: Sam = sam_model_registry[checkpoint_type](checkpoint=checkpoint, custom=custom_model_path)
+    def load_model(
+        checkpoint="./sam_vit_b_01ec64.pth",
+        checkpoint_type="vit_b",
+        custom_model_path: str = None,
+    ) -> Sam:
+        sam: Sam = sam_model_registry[checkpoint_type](
+            checkpoint=checkpoint, custom=custom_model_path
+        )
         return sam
 
     model = load_model(custom_model_path=custom_model_path)
@@ -129,7 +142,7 @@ def make_model(
     else:
         logger.success("Load custom model")
         pass
-    
+
     optimizer = torch.optim.Adam(model.parameters(), learning_rate)
     logger.info("Model sctructure")
     summary(model.prompt_encoder)
@@ -226,12 +239,7 @@ def train(
 
             # 1 mask have to clone to fit the number of prompt
             # and the number of multiple-mask
-            mask = (
-                mask
-                .unsqueeze(1)
-                .repeat_interleave(3, dim=1)
-                .type(torch.int64)
-            )
+            mask = mask.unsqueeze(1).repeat_interleave(3, dim=1).type(torch.int64)
 
             loss = loss_fnc.forward(
                 multi_mask_pred=masks_pred,

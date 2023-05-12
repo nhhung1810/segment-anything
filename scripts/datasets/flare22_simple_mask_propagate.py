@@ -109,18 +109,21 @@ class FLARE22_SimpleMaskPropagate(Dataset):
         cache_name: str = TRAIN_CACHE_NAME,
         is_debug: bool = False,
         device: str = "cpu",
+        class_selected: List[int] = None,
     ) -> None:
         super().__init__()
         # For preprocess data
         self.device = device
-
+        self.class_selected = class_selected or list(range(1, 14))
         self.pre_trained_sam = pre_trained_sam
+        self.dataset_root = dataset_root
+
         if pre_trained_sam:
             self.pre_trained_sam.eval()
             self.train_sam = SamTrain(self.pre_trained_sam)
-        self.dataset_root = dataset_root
 
         self.file = FileLoader(metadata_path=metadata_path, dataset_root=dataset_root)
+
         if is_debug:
             self.file.data = self.file.data[: self.LIMIT]
         self.cache_path = os.path.join(self.dataset_root, cache_name)
@@ -151,7 +154,7 @@ class FLARE22_SimpleMaskPropagate(Dataset):
         return dict(
             img_emb=img_emb.to(self.device),
             mask=mask.to(self.device),
-            previous_mask=previous_mask.to(self.device)
+            previous_mask=previous_mask.to(self.device),
         )
 
     def __len__(self):
@@ -176,8 +179,8 @@ class FLARE22_SimpleMaskPropagate(Dataset):
                 f"{data['name']}/{current_id}.pt",
             )
             previous_cache_path = os.path.join(
-                    self.cache_path, f"{data['name']}/{previous_id}.pt"
-                )
+                self.cache_path, f"{data['name']}/{previous_id}.pt"
+            )
 
             if not os.path.exists(current_cache_path):
                 continue
@@ -268,10 +271,16 @@ class FLARE22_SimpleMaskPropagate(Dataset):
         previous_masks = omit(
             previous_data_dict, ["img_emb", "original_size", "input_size", "n_masks"]
         )
+
         for class_number, mask in masks.items():
-            previous_mask = previous_masks.get(class_number, {}).get('mask', None)
+            # Omit class that not in the list
+            if int(class_number) not in self.class_selected:
+                continue
+
+            previous_mask = previous_masks.get(class_number, {}).get("mask", None)
             # If there are no previous mask -> abort
-            if previous_mask is None: continue
+            if previous_mask is None:
+                continue
             self.dataset.append(
                 {**embedding, "mask": mask["mask"], "previous_mask": previous_mask}
             )
@@ -328,6 +337,6 @@ if __name__ == "__main__":
     for idx, batch in enumerate(loader):
         for k, v in batch.items():
             print(f"{k} : {v.shape}")
-            if idx == 10: 
+            if idx == 10:
                 break
     pass
