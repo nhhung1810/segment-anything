@@ -118,7 +118,7 @@ def pick_best_mask(
         return chosen_idx.int(), dice.detach().cpu().item()
 
     if strategy == "prev":
-        previous_mask = torch.as_tensor(previous_mask)[
+        previous_mask = torch.as_tensor(previous_mask, device=device)[
             None, None, ...
         ].repeat_interleave(3, dim=1)
         dice = DICE_FN.run_on_batch(input=pred_multi_mask, target=previous_mask)
@@ -270,8 +270,6 @@ def inference(
     for image_file, gt_file in tqdm(
         zip(images, gts), total=len(images), desc="Inference for patient..."
     ):
-        if "0008" not in gt_file:
-            continue
         patient_name = os.path.basename(image_file).replace(".nii.gz", "")
         volumes, masks = preprocessor.run_with_config(
             image_file=image_file,
@@ -300,7 +298,8 @@ def inference(
                 img=img,
                 mask=mask,
                 previous_merged_mask=previous_mask,
-                cache_img_emb_path=f"{CACHE_DIR}/{patient_name}/{idx}.pt",
+                cache_img_emb_path=None
+                # f"{CACHE_DIR}/{patient_name}/{idx}.pt",
             )
 
             previous_mask = merged_prediction
@@ -319,7 +318,7 @@ def inference(
             gt_file=gt_file,
             out_dir=inference_save_dir,
         )
-        break
+        pass
 
 
 parser = ArgumentParser()
