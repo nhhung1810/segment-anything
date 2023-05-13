@@ -1,5 +1,6 @@
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+from git import CacheError
 import numpy as np
 from torch import Tensor
 import torch
@@ -29,24 +30,6 @@ LEGEND_DICT = {
 }
 
 DICE_FN = DiceLoss(activation=None, reduction="none")
-
-
-def run_prepare_img_with_cache(sam_train, img, cache_img_emb_path):
-    if cache_img_emb_path is None:
-        img_emb, original_size, input_size = sam_train.prepare_img(image=img)
-    else:
-        data = pick(
-            torch.load(cache_img_emb_path, map_location="cpu"),
-            ["img_emb", "original_size", "input_size"],
-        )
-        img_emb, original_size, input_size = (
-            data["img_emb"],
-            data["original_size"],
-            data["input_size"],
-        )
-        original_size = (original_size[0], original_size[1])
-        input_size = (input_size[0], input_size[1])
-    return img_emb, original_size, input_size
 
 
 def load_model(model_path, device=DEFAULT_DEVICE) -> Sam:
@@ -158,14 +141,21 @@ def frame_inference(
     img: np.ndarray,
     mask: np.ndarray,
     class_appearance_range: Tuple[np.ndarray, np.ndarray],
+    cache_frame: Optional[Dict[str, Tensor]] = None,
     previous_merged_mask: np.ndarray = None,
     device: str = DEFAULT_DEVICE,
-    cache_img_emb_path: str = None,
     dice_with: str = "prev",
 ):
-    img_emb, original_size, input_size = run_prepare_img_with_cache(
-        sam_train, img, cache_img_emb_path
-    )
+    if cache_frame is None:
+        img_emb, original_size, input_size = sam_train.prepare_img(image=img)
+        cache_frame = dict(
+            img_emb=img_emb, original_size=original_size, input_size=input_size
+        )
+        pass
+    img_emb = cache_frame["img_emb"]
+    original_size = cache_frame["original_size"]
+    input_size = cache_frame["input_size"]
+
     starts, ends = class_appearance_range
     class_pred_list = {}
     for class_num in selected_class:
@@ -188,7 +178,7 @@ def frame_inference(
         pass
 
     merged_mask = merge_function(class_pred_list, device=device)
-    return merged_mask
+    return merged_mask, cache_frame
 
 
 def class_inference(
@@ -258,6 +248,14 @@ def class_inference(
     return mask_pred
 
 
+def torch_try_load(path: str, device: str) -> dict:
+    try:
+        return torch.load(path, map_location=device)
+    except Exception as msg:
+        pass
+    return {}
+
+
 def inference(
     images: List[str],
     gts: List[str],
@@ -271,14 +269,16 @@ def inference(
     for image_file, gt_file in tqdm(
         zip(images, gts), total=len(images), desc="Inference for patient..."
     ):
-        patient_name = os.path.basename(image_file).replace(".nii.gz", "")
+        # patient_name = os.path.basename(image_file).replace(".nii.gz", "")
+        cache_volume_path = image_file.replace(".nii.gz", ".cache.pt")
         volumes, masks = preprocessor.run_with_config(
             image_file=image_file,
             gt_file=gt_file,
             config_name=IMAGE_TYPE.ABDOMEN_SOFT_TISSUES_ABDOMEN_LIVER,
         )
-        # start_idx, end_idx = find_organ_range(masks=masks, class_num=class_num)
+
         starts, ends = get_all_organ_range(masks)
+        cache_volume = torch_try_load(cache_volume_path, map_location=device)
         predict_volume = []
         previous_mask = None
         for idx in tqdm(
@@ -290,8 +290,8 @@ def inference(
             # Grey-scale 3 channels
             img = volumes[idx][..., None].repeat(3, -1)
             mask = masks[idx, ...]
-
-            merged_prediction = frame_inference(
+            cache_frame = cache_volume.get(idx, None)
+            merged_prediction, cache_frame = frame_inference(
                 sam_train=sam_train,
                 selected_class=selected_class,
                 class_appearance_range=(starts, ends),
@@ -299,20 +299,19 @@ def inference(
                 img=img,
                 mask=mask,
                 previous_merged_mask=previous_mask,
-                cache_img_emb_path=None,
-                # f"{CACHE_DIR}/{patient_name}/{idx}.pt",
                 device=device,
+                cache_frame=cache_frame,
             )
 
             previous_mask = merged_prediction
             save_pred = merged_prediction.detach().cpu().numpy().astype(np.uint8)
             predict_volume.append(save_pred)
+            cache_volume[idx] = cache_frame
             pass
         # Pack all prediction into volume
         predict_volume = np.stack(predict_volume, axis=0)
         # new shape=[H, W, T]
         predict_volume = predict_volume.transpose(1, 2, 0).astype(np.uint8)
-        # To correct the class number
 
         # Convert file into nii.gz format for inference
         post_process(
@@ -320,6 +319,7 @@ def inference(
             gt_file=gt_file,
             out_dir=inference_save_dir,
         )
+        torch.save(cache_volume, cache_volume_path)
         pass
 
 
@@ -354,6 +354,12 @@ parser.add_argument(
 parser.add_argument(
     "-ckpt", "--checkpoint", type=str, help="Model checkpoint to load", default=None
 )
+parser.add_argument(
+    "--use_cache",
+    type=str,
+    help="Allow the model to use embedding cache for faster inference",
+    default=True,
+)
 
 parser.add_argument(
     "--selected_class",
@@ -365,7 +371,7 @@ parser.add_argument(
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    device = f"cuda:{args.cuda}"
+    device = f"cuda:{args.cuda}" if "cuda" in DEFAULT_DEVICE else DEFAULT_DEVICE
 
     run_path = "mask-prop-230509-005503"
     model_path = args.checkpoint or f"runs/{run_path}/model-100.pt"
@@ -376,12 +382,18 @@ if __name__ == "__main__":
     input_dir = args.input_dir
     label_dir = args.label_dir
     selected_class = args.selected_class or list(range(1, 14))
+    use_cache = args.use_cache
     for c in selected_class:
         assert c in range(1, 14)
     print(
-        "🚀 ~ file: inference_merge_class.py:173 ~ model_path:",
-        model_path,
-        inference_save_dir,
+        f"""
+        model-path     : {model_path}
+        save-dir       :  {inference_save_dir}
+        input-dir      : {input_dir}
+        label-dir      : {label_dir}
+        is-use-cache   : {use_cache}
+        selected-class : {selected_class}
+        """
     )
     make_directory(inference_save_dir)
 
@@ -402,7 +414,7 @@ if __name__ == "__main__":
         inference_save_dir=inference_save_dir,
         sam_train=sam_train,
         selected_class=selected_class,
-        device=device
+        device=device,
     )
 
     pass
