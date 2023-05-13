@@ -278,7 +278,7 @@ def inference(
         )
 
         starts, ends = get_all_organ_range(masks)
-        cache_volume = torch_try_load(cache_volume_path, map_location=device)
+        cache_volume = torch_try_load(cache_volume_path, device=device)
         predict_volume = []
         previous_mask = None
         for idx in tqdm(
