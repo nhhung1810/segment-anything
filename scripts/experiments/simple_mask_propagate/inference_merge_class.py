@@ -187,7 +187,7 @@ def frame_inference(
         class_pred_list[class_num] = mask_pred
         pass
 
-    merged_mask = merge_function(class_pred_list)
+    merged_mask = merge_function(class_pred_list, device=device)
     return merged_mask
 
 
@@ -264,6 +264,7 @@ def inference(
     sam_train: SamTrain,
     inference_save_dir: str,
     selected_class: List[int],
+    device: str,
 ):
     assert len(images) == len(gts)
     preprocessor = FLARE22_Preprocess()
@@ -298,8 +299,9 @@ def inference(
                 img=img,
                 mask=mask,
                 previous_merged_mask=previous_mask,
-                cache_img_emb_path=None
+                cache_img_emb_path=None,
                 # f"{CACHE_DIR}/{patient_name}/{idx}.pt",
+                device=device,
             )
 
             previous_mask = merged_prediction
@@ -330,6 +332,12 @@ parser.add_argument(
     default=f"{TRAIN_NON_PROCESSED}/images",
 )
 parser.add_argument(
+    "--cuda",
+    type=int,
+    help="GPU index",
+    default=1,
+)
+parser.add_argument(
     "-l",
     "--label_dir",
     type=str,
@@ -357,11 +365,11 @@ parser.add_argument(
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    device = DEFAULT_DEVICE
+    device = f"cuda:{args.cuda}"
 
     run_path = "mask-prop-230509-005503"
     model_path = args.checkpoint or f"runs/{run_path}/model-100.pt"
-    model = load_model(model_path)
+    model = load_model(model_path, device)
     sam_train = SamTrain(sam_model=model)
 
     inference_save_dir = args.output_dir
@@ -394,6 +402,7 @@ if __name__ == "__main__":
         inference_save_dir=inference_save_dir,
         sam_train=sam_train,
         selected_class=selected_class,
+        device=device
     )
 
     pass

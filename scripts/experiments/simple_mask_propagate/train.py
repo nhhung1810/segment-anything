@@ -67,10 +67,12 @@ def config():
     class_selected = [
         FLARE22_LABEL_ENUM.LIVER.value,
         FLARE22_LABEL_ENUM.GALLBLADDER.value,
+        FLARE22_LABEL_ENUM.IVC.value,
+        FLARE22_LABEL_ENUM.RIGHT_KIDNEY.value
     ]
     n_epochs = 100
     save_epoch = 5
-    evaluate_epoch = 5
+    evaluate_epoch = 10
 
     gradient_accumulation_step = 4
 
