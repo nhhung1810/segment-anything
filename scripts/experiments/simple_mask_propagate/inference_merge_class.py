@@ -1,3 +1,4 @@
+from glob import glob
 import os
 from typing import Dict, List, Optional, Tuple
 from git import CacheError
@@ -397,7 +398,8 @@ if __name__ == "__main__":
     )
     make_directory(inference_save_dir)
 
-    images_path: List[str] = sorted(os.listdir(input_dir))
+    images_path: List[str] = sorted(glob(f"{input_dir}/*.nii.gz"))
+    images_path = [os.path.basename(p) for p in images_path]
     labels_path = [
         os.path.join(label_dir, p.replace("_0000.nii.gz", ".nii.gz"))
         for p in images_path
@@ -405,8 +407,8 @@ if __name__ == "__main__":
     images_path = [os.path.join(input_dir, p) for p in images_path]
 
     for i, p in zip(images_path, labels_path):
-        assert os.path.exists(i)
-        assert os.path.exists(p)
+        assert os.path.exists(i), f"{i}"
+        assert os.path.exists(p), f"{p}"
 
     inference(
         images=images_path,
