@@ -15,7 +15,9 @@ import argparse
 from tqdm import tqdm
 
 parser = argparse.ArgumentParser("Official evaluation code from FLARE")
-parser.add_argument("-n", "--name", type=str, help="Experiment name", default="Untitled")
+parser.add_argument(
+    "-n", "--name", type=str, help="Experiment name", default="Untitled"
+)
 parser.add_argument("-g", "--gt_dir", type=str, help="Ground Truth directory")
 parser.add_argument("-p", "--pred_dir", type=str, help="Prediction directory")
 
@@ -46,7 +48,7 @@ def eval(args):
         gt_name = name.replace("_0000.nii.gz", ".nii.gz")
         if not osp.isfile(osp.join(gt_path, gt_name)):
             continue
-        
+
         seg_metrics["Name"].append(name)
         seg_metrics["DSC_mean"].append(0)
         seg_metrics["NSD-1mm_mean"].append(0)
@@ -85,9 +87,9 @@ def eval(args):
     seg_metrics["DSC_mean"].insert(0, np.mean(seg_metrics["DSC_mean"]))
     seg_metrics["NSD-1mm_mean"].insert(0, np.mean(seg_metrics["NSD-1mm_mean"]))
 
-    df_dict['Name'] = EXPERIMENT_NAME
-    df_dict['DSC_mean'] = seg_metrics["DSC_mean"][0]
-    df_dict['NSD-1mm_mean'] = seg_metrics["NSD-1mm_mean"][0]
+    df_dict["Name"] = EXPERIMENT_NAME
+    df_dict["DSC_mean"] = seg_metrics["DSC_mean"][0]
+    df_dict["NSD-1mm_mean"] = seg_metrics["NSD-1mm_mean"][0]
 
     for i in tqdm(range(1, NUM_CLASSES + 1), desc="Logging data..."):
         seg_metrics["DSC_{}".format(i)].insert(
@@ -99,8 +101,10 @@ def eval(args):
         df_dict["DSC_{}".format(i)] = seg_metrics["DSC_{}".format(i)][0]
         df_dict["NSD-1mm_{}".format(i)] = seg_metrics["NSD-1mm_{}".format(i)][0]
 
-    date=datetime.now()
-    df2 = pd.DataFrame([[date] + list(df_dict.values())], columns=["Date"] + list(df_dict.keys()))
+    date = datetime.now()
+    df2 = pd.DataFrame(
+        [[date] + list(df_dict.values())], columns=["Date"] + list(df_dict.keys())
+    )
     pd.concat([df, df2]).to_csv(LOG, index=False)
 
     # Print table
@@ -110,5 +114,10 @@ def eval(args):
 
 
 if __name__ == "__main__":
+    from time import time_ns
+
     args = parser.parse_args()
+    start = time_ns()
     eval(args)
+    stop = time_ns()
+    print(f"Time elapsed: {(stop-start)/10**6}ms")
