@@ -30,6 +30,7 @@ class IMAGE_TYPE(Enum):
 # Respective to root
 DATASET_ROOT = "./dataset/FLARE22-version1/"
 TRAIN_NON_PROCESSED = "./dataset/FLARE22-version1/FLARE22_LabeledCase50"
+TEST_NON_PROCESSED = "./dataset/FLARE22-version1/ReleaseValGT-20cases/"
 
 # Processed data
 TRAIN_PATH = "./dataset/FLARE22-version1/TrainImageProcessed"

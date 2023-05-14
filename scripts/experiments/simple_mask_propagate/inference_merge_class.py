@@ -7,7 +7,12 @@ from torch import Tensor
 import torch
 from tqdm import tqdm
 from scripts.constants import FLARE22_LABEL_ENUM
-from scripts.datasets.constant import DATASET_ROOT, IMAGE_TYPE, TRAIN_NON_PROCESSED
+from scripts.datasets.constant import (
+    DATASET_ROOT,
+    IMAGE_TYPE,
+    TRAIN_NON_PROCESSED,
+    TEST_NON_PROCESSED,
+)
 from scripts.datasets.flare22_simple_mask_propagate import FLARE22_SimpleMaskPropagate
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.render import Renderer
@@ -330,7 +335,7 @@ parser.add_argument(
     "--input_dir",
     type=str,
     help="Volume image directory",
-    default=f"{TRAIN_NON_PROCESSED}/images",
+    default=f"{TEST_NON_PROCESSED}/images",
 )
 parser.add_argument(
     "--cuda",
@@ -343,7 +348,7 @@ parser.add_argument(
     "--label_dir",
     type=str,
     help="Volume label directory",
-    default=f"{TRAIN_NON_PROCESSED}/labels",
+    default=f"{TEST_NON_PROCESSED}/labels",
 )
 parser.add_argument(
     "-o",
