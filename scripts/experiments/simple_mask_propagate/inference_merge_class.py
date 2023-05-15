@@ -405,6 +405,17 @@ if __name__ == "__main__":
 
     images_path: List[str] = sorted(glob(f"{input_dir}/*.nii.gz"))
     images_path = [os.path.basename(p) for p in images_path]
+    # By some way, they don't have gallbladder, which i will omit for now
+    images_path.remove("FLARETs_0006_0000.nii.gz")
+    images_path.remove("FLARETs_0008_0000.nii.gz")
+    images_path.remove("FLARETs_0021_0000.nii.gz")
+    images_path.remove("FLARETs_0031_0000.nii.gz")
+    images_path.remove("FLARETs_0033_0000.nii.gz")
+    images_path.remove("FLARETs_0036_0000.nii.gz")
+    images_path.remove("FLARETs_0038_0000.nii.gz")
+    images_path.remove("FLARETs_0043_0000.nii.gz")
+    images_path.remove("FLARETs_0044_0000.nii.gz")
+    images_path.remove("FLARETs_0048_0000.nii.gz")
     labels_path = [
         os.path.join(label_dir, p.replace("_0000.nii.gz", ".nii.gz"))
         for p in images_path

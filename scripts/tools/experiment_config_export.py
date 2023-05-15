@@ -4,7 +4,6 @@ from glob import glob
 import json
 import os
 import pandas as pd
-import torch
 
 from scripts.utils import pick
 

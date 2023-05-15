@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import nibabel as nb
 import os
@@ -129,11 +130,12 @@ def eval(args):
         [[date] + list(df_dict.values())], columns=["Date"] + list(df_dict.keys())
     )
     pd.concat([df, df2]).to_csv(LOG, index=False)
-
+    with open(os.path.join(seg_path, "all-result.json"), 'w') as out:
+        json.dump(seg_metrics, out)
     # Print table
-    table = tabulate(seg_metrics, headers="keys", tablefmt="fancy_grid")
+    # table = tabulate(seg_metrics, headers="keys", tablefmt="fancy_grid")
 
-    print(table)
+    # print(table)
 
 
 if __name__ == "__main__":
