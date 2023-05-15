@@ -24,14 +24,15 @@ def resize(im: np.ndarray, target_size=[256, 256]):
     [w, h] = target_size
     return T.Resize(size=(w, h))(_im)
 
-def make_directory(path:str, is_file : bool = False):
+
+def make_directory(path: str, is_file: bool = False):
     """Make nest directory from path.
 
     Args:
         path (str): target path
-        is_file (bool, optional): if True, omit the file 
+        is_file (bool, optional): if True, omit the file
             component and make directory. Defaults to False.
-    """    
+    """
 
     def make_nested_dir(directory: str) -> str:
         """Make nested Directory
@@ -44,24 +45,11 @@ def make_directory(path:str, is_file : bool = False):
         """
         Path(directory).mkdir(parents=True, exist_ok=True)
         return directory
-    
+
     if is_file:
         return make_nested_dir(os.path.dirname(path))
-    
+
     return make_nested_dir(path)
-
-
-GROUP1 = "FLARE22_Tr_0001_0000_abdomen-soft tissues_abdomen-liver"
-GROUP2 = "FLARE22_Tr_0001_0000_chest-lungs_chest-mediastinum"
-GROUP3 = "FLARE22_Tr_0001_0000_spine-bone"
-
-
-def get_data_paths(GROUP):
-    data = list(glob.glob(f"../dataset/FLARE-small/{GROUP}/*"))
-    mask = list(glob.glob("../dataset/FLARE-small/FLARE22_Tr_0001_0000-mask/*"))
-    data = sorted(data)
-    mask = sorted(mask)
-    return data, mask
 
 
 def load_img(path):
@@ -139,7 +127,9 @@ def summary(model, file=sys.stdout):
     return count
 
 
-def extract_non_image_encoder(model_path: str, save_path: str, model_type: str = 'vit_b'):
+def extract_non_image_encoder(
+    model_path: str, save_path: str, model_type: str = "vit_b"
+):
     if isinstance(torch.load(model_path), Sam):
         torch.save(torch.load(model_path).state_dict(), model_path)
         pass
@@ -158,3 +148,11 @@ if __name__ == "__main__":
     for file in files:
         extract_non_image_encoder(file, file)
     pass
+
+
+def torch_try_load(path: str, device: str) -> dict:
+    try:
+        return torch.load(path, map_location=device)
+    except Exception as msg:
+        pass
+    return {}

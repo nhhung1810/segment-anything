@@ -18,7 +18,7 @@ from scripts.datasets.constant import (
 from scripts.datasets.flare22_loader import FileLoader
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.experiments.simple_mask_propagate.inference import find_organ_range
-from scripts.render import Renderer
+from scripts.render.render import Renderer
 from scripts.utils import load_file_npz, load_img, make_directory, omit
 from segment_anything.utils.transforms import ResizeLongestSide
 

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import itertools
 from typing import Dict, List, Tuple
 from matplotlib.axes import Axes

@@ -1,7 +1,6 @@
 from typing import Optional, Tuple
 
 from tqdm import tqdm
-from scripts.utils import GROUP2, get_data_paths, load_file_npz, load_img
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 
@@ -24,7 +23,9 @@ class SamTrain:
         super().__init__()
         self.model = sam_model
         self.transform = ResizeLongestSide(sam_model.image_encoder.img_size)
-        self.mask_transform = ResizeLongestSide(target_length=sam_model.image_encoder.img_size // 4)
+        self.mask_transform = ResizeLongestSide(
+            target_length=sam_model.image_encoder.img_size // 4
+        )
 
     def predict_torch(
         self,
@@ -60,8 +61,9 @@ class SamTrain:
         # Force the sparse-embedding into 0.0 so that it won't affect
         # mask-decoder
         if sparse_embeddings.shape[1] == 0:
-            sparse_embeddings = torch.empty((1, *sparse_embeddings.shape[1:]), device=self.device)
-
+            sparse_embeddings = torch.empty(
+                (1, *sparse_embeddings.shape[1:]), device=self.device
+            )
 
         # Predict masks
         low_res_masks, iou_predictions = self.model.mask_decoder(
@@ -170,7 +172,7 @@ class SamTrain:
         """Formatting Mask input
         Args:
             mask_input (np.ndarray | torch.Tensor): shape = [batch_size, H, W]
-        """        
+        """
         mask_input_torch = torch.as_tensor(
             mask_input, dtype=torch.float, device=self.device
         )
@@ -210,34 +212,6 @@ class SamTrain:
 def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> Sam:
     sam: Sam = sam_model_registry[checkpoint_type](checkpoint=checkpoint)
     return sam
-
-
-def batch_cache_emb():
-    sam = load_model()
-    sam_train = SamTrain(sam_model=sam)
-    data_path, mask_path = get_data_paths(GROUP2)
-    batch_data = {}
-    for path, mask_path in tqdm(
-        zip(data_path, mask_path), desc="Prediction...", total=len(data_path)
-    ):
-        img = load_img(path)
-        mask = torch.as_tensor(load_file_npz(mask_path))
-        img_emb, original_size, input_size = sam_train.prepare_img(image=img)
-        batch_data[path] = {
-            "img_emb": img_emb,
-            "original_size": original_size,
-            "input_size": input_size,
-            "mask_path": mask_path,
-            "mask": mask,
-        }
-        pass
-
-    torch.save(batch_data, "batch_data.pt")
-    pass
-
-
-def load_batch_emb(path):
-    return torch.load(path)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import torch
 from enum import Enum
 
 DEFAULT_DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
+SECOND_DEVICE = "cuda:1" if torch.cuda.is_available() else "cpu"
 
 
 class FLARE22_LABEL_ENUM(Enum):

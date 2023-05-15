@@ -12,7 +12,7 @@ from scripts.constants import (
     VAL_GROUP2,
     VAL_GROUP3,
 )
-from scripts.render import Renderer
+from scripts.render.render import Renderer
 from segment_anything import SamPredictor, sam_model_registry
 import numpy as np
 from utils import (
