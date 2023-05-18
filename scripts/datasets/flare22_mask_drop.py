@@ -122,6 +122,7 @@ class FLARE22_MaskDrop(Dataset):
         self.dataset_root = dataset_root
         self.allow_augmentation = allow_augmentation
         self.augmentation_prop = augmentation_prop
+        self.max_crop_ratio = 0.5
 
         if pre_trained_sam:
             self.pre_trained_sam.eval()
@@ -157,7 +158,7 @@ class FLARE22_MaskDrop(Dataset):
         mask = data["mask"]
         previous_mask = data["previous_mask"]
         class_number = data["class_number"]
-        if class_number in self.allow_augmentation:
+        if int(class_number) in self.allow_augmentation:
             previous_mask = self.drop_mask(previous_mask)
             pass
         return dict(
@@ -165,34 +166,7 @@ class FLARE22_MaskDrop(Dataset):
             mask=mask.to(self.device),
             previous_mask=previous_mask.to(self.device),
         )
-
-    def mask_drop(mask: Tensor, class_num: int, max_crop_ratio=0.5):
-        coors = np.argwhere(mask == class_num)
-        if coors.shape[0] == 0:
-            return mask
-        xs = coors[:, 1]
-        ys = coors[:, 0]
-        top_left = [xs.min(), ys.min()]
-        right_bottom = [xs.max(), ys.max()]
-        w, h = [right_bottom[0] - top_left[0], right_bottom[1] - top_left[1]]
-
-        # Define the max_crop
-        max_crop = int(min(w, h) * max_crop_ratio)
-
-        drop_fn = A.CoarseDropout(
-            max_holes=1,
-            max_height=int(max_crop),
-            max_width=int(max_crop),
-            fill_value=0.0,
-            always_apply=True,
-        )
-        y_slice = slice(top_left[1], right_bottom[1])
-        x_slice = slice(top_left[0], right_bottom[0])
-        sub_mask = mask[y_slice, x_slice]
-        sub_mask = drop_fn(image=sub_mask)["image"]
-        mask[y_slice, x_slice] = sub_mask
-        return mask
-
+    
     def drop_mask(self, previous_mask: Tensor):
         coors = torch.argwhere(previous_mask)
         if coors.shape[0] == 0:
@@ -208,14 +182,14 @@ class FLARE22_MaskDrop(Dataset):
             max_height=int(max_crop),
             max_width=int(max_crop),
             fill_value=0.0,
-            p=self.prob_augmentation,
+            p=self.augmentation_prop,
         )
         # Sub-region augmentation only
         y_slice = slice(top_left[1], right_bottom[1])
         x_slice = slice(top_left[0], right_bottom[0])
         sub_mask = previous_mask[y_slice, x_slice]
-        sub_mask = drop_fn(image=sub_mask)["image"]
-        previous_mask[y_slice, x_slice] = sub_mask
+        sub_mask = drop_fn(image=sub_mask.cpu().numpy())["image"]
+        previous_mask[y_slice, x_slice] = torch.as_tensor(sub_mask)
         return previous_mask
 
     def __len__(self):
@@ -388,17 +362,20 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 if __name__ == "__main__":
     sam = load_model()
     sam.to("cuda:0")
-    FLARE22_MaskDrop.LIMIT = 20
     dataset = FLARE22_MaskDrop(
-        cache_name=FLARE22_MaskDrop.VAL_CACHE_NAME,
-        metadata_path=VAL_METADATA,
+        cache_name=FLARE22_MaskDrop.TRAIN_CACHE_NAME,
+        metadata_path=TRAIN_METADATA,
         is_debug=False,
         pre_trained_sam=sam,
         device=sam.device,
+        allow_augmentation=[FLARE22_LABEL_ENUM.LIVER.value],
+        augmentation_prop=1.0,
+        class_selected=[1]
     )
     dataset.preprocess()
     dataset.preload()
     print(len(dataset))
+    import matplotlib.pyplot as plt
     loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
     for idx, batch in enumerate(loader):
         for k, v in batch.items():
