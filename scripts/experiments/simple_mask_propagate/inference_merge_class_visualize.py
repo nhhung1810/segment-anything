@@ -258,7 +258,7 @@ def visualize(
                 ),
             )
         )
-        .show(save_path=f"{visual_dir}/{patient_name}_{idx:0>4}.png")
+        .show(save_path=f"{visual_dir}/{patient_name}/{idx:0>4}.png")
         .reset()
     )
     return
@@ -316,6 +316,7 @@ if __name__ == "__main__":
 
     run_path = "mask-prop-230509-005503"
     model_path = args.checkpoint or f"runs/{run_path}/model-100.pt"
+    run_path = os.path.dirname(model_path).replace("runs/", "")
     visual_dir = f"runs/visualize/{run_path}/{os.path.basename(model_path)}/"
     model = load_model(model_path, device)
     sam_train = SamTrain(sam_model=model)
@@ -340,7 +341,7 @@ if __name__ == "__main__":
     make_directory(inference_save_dir)
 
     images_path: List[str] = sorted(glob(f"{input_dir}/*.nii.gz"))
-    # images_path = [i for i in images_path if "0002" in i]
+    images_path = [os.path.basename(p) for p in images_path]
     images_path.remove("FLARETs_0006_0000.nii.gz")
     images_path.remove("FLARETs_0008_0000.nii.gz")
     images_path.remove("FLARETs_0021_0000.nii.gz")
@@ -351,7 +352,6 @@ if __name__ == "__main__":
     images_path.remove("FLARETs_0043_0000.nii.gz")
     images_path.remove("FLARETs_0044_0000.nii.gz")
     images_path.remove("FLARETs_0048_0000.nii.gz")
-    images_path = [os.path.basename(p) for p in images_path]
     labels_path = [
         os.path.join(label_dir, p.replace("_0000.nii.gz", ".nii.gz"))
         for p in images_path
