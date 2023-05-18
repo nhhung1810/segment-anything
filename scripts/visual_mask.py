@@ -4,6 +4,10 @@ import subprocess
 from typing import List
 import natsort
 import numpy as np
+import albumentations as T
+from torch import Tensor
+import torch
+
 
 from torchvision.transforms.functional import resize, to_pil_image  # type: ignore
 from tqdm import tqdm
@@ -27,6 +31,17 @@ from segment_anything.utils.transforms import ResizeLongestSide
 PATH = "/dataset/FLARE22-version1"
 VAL_MASK = f"{PATH}/ValMask"
 VAL_IMAGE = f"{PATH}/ValImageProcessed"
+
+
+def mask_drop(mask: Tensor, class_num: int):
+    coors = torch.argwhere(mask == class_num)
+    if coors.shape[0] == 0:
+        return
+
+    xs = coors[:, 1]
+    ys = coors[:, 0]
+
+    pass
 
 
 def get_all_organ_range(masks):
@@ -133,6 +148,7 @@ def visualize(
             [cmd],
             shell=True,
         )
+        break
     pass
 
 
