@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from scripts.datasets.constant import (
     IMAGE_TYPE,
+    TEST_NON_PROCESSED,
     TRAIN_NON_PROCESSED,
     VAL_METADATA,
     FLARE22_LABEL_ENUM,
@@ -77,7 +78,7 @@ def visualize(
         zip(images, gts), total=len(images), desc="Inference for patient..."
     ):
         patient_name = os.path.basename(image_file).replace(".nii.gz", "")
-        _dir = make_directory(f"./runs/visualize/{patient_name}")
+        _dir = make_directory(f"./runs/visualize/train-case/{patient_name}")
 
         # shape = [T, H, W]
         volumes, masks = preprocessor.run_with_config(
@@ -132,7 +133,6 @@ def visualize(
             [cmd],
             shell=True,
         )
-        break
     pass
 
 
@@ -140,6 +140,7 @@ if __name__ == "__main__":
     image_dir = f"{TRAIN_NON_PROCESSED}/images"
     label_dir = f"{TRAIN_NON_PROCESSED}/labels"
     images_path: List[str] = sorted(os.listdir(image_dir))
+    images_path = [p for p in images_path if "cache" not in p]
     labels_path = [
         os.path.join(label_dir, p.replace("_0000.nii.gz", ".nii.gz"))
         for p in images_path
