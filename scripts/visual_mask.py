@@ -7,6 +7,7 @@ import numpy as np
 import albumentations as T
 from torch import Tensor
 import torch
+import matplotlib.pyplot as plt
 
 
 from torchvision.transforms.functional import resize, to_pil_image  # type: ignore
@@ -33,15 +34,32 @@ VAL_MASK = f"{PATH}/ValMask"
 VAL_IMAGE = f"{PATH}/ValImageProcessed"
 
 
-def mask_drop(mask: Tensor, class_num: int):
-    coors = torch.argwhere(mask == class_num)
+def mask_drop(mask: Tensor, class_num: int, max_crop_ratio=0.5):
+    coors = np.argwhere(mask == class_num)
     if coors.shape[0] == 0:
-        return
-
+        return mask
     xs = coors[:, 1]
     ys = coors[:, 0]
+    top_left = [xs.min(), ys.min()]
+    right_bottom = [xs.max(), ys.max()]
+    w, h = [right_bottom[0] - top_left[0], right_bottom[1] - top_left[1]]
 
-    pass
+    # Define the max_crop
+    max_crop = int(min(w, h) * max_crop_ratio)
+
+    drop_fn = T.CoarseDropout(
+        max_holes=1,
+        max_height=int(max_crop),
+        max_width=int(max_crop),
+        fill_value=0.0,
+        always_apply=True,
+    )
+    y_slice = slice(top_left[1], right_bottom[1])
+    x_slice = slice(top_left[0], right_bottom[0])
+    sub_mask = mask[y_slice, x_slice]
+    sub_mask = drop_fn(image=sub_mask)["image"]
+    mask[y_slice, x_slice] = sub_mask
+    return mask
 
 
 def get_all_organ_range(masks):
@@ -119,6 +137,7 @@ def visualize(
             # Convert into RBG
             img = volumes[idx, ...]
             mask = masks[idx, ...]
+            mask = mask_drop(mask, 1)
             bboxes = calculate_bbox(mask)
             if direction == "H":
                 target_size = (img.shape[1] // 4, img.shape[1] // 8)
