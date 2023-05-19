@@ -177,6 +177,9 @@ class FLARE22_MaskDrop(Dataset):
         right_bottom = [xs.max(), ys.max()]
         w, h = [right_bottom[0] - top_left[0], right_bottom[1] - top_left[1]]
         max_crop = int(min(w, h) * self.max_crop_ratio)
+        if max_crop == 0: 
+            return previous_mask
+        
         drop_fn = A.CoarseDropout(
             max_holes=1,
             max_height=int(max_crop),

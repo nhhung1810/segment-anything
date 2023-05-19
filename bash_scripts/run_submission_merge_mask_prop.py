@@ -37,7 +37,7 @@ parser.add_argument(
     "--skip_eval",
     type=bool,
     help="Is skip eval?",
-    default=True,
+    default=False,
 )
 
 args = parser.parse_args()
@@ -60,23 +60,23 @@ if __name__ == "__main__":
         check_point = os.path.basename(model_path).replace(".pt", "").split("-")[1]
         output_dir = f"runs/submission/{model_name}/{check_point}/"
         eval_cmd = f"""
-            \ && python scripts/tools/evaluation/DSC_NSD_eval_fast.py\
+            python scripts/tools/evaluation/DSC_NSD_eval_fast.py\
                 -g {TEST_NON_PROCESSED}/labels\
                 -p {output_dir}\
-                --name "mgmin-{model_name}-{check_point}"
+                --name "faug-{model_name}-{check_point}"
             """ if not is_skip_eval else ""
         if not is_custom_class:
             run_inference_cmd = f"""
-            python scripts/experiments/simple_mask_propagate/inference_merge_class_visualize.py\
+            python scripts/experiments/simple_mask_propagate/inference_merge_class.py\
                 --checkpoint {model_path} \
-                --output_dir {output_dir} {eval_cmd}
+                --output_dir {output_dir} && {eval_cmd}
             """
         else:
             run_inference_cmd = f"""
-            python scripts/experiments/simple_mask_propagate/inference_merge_class_visualize.py\
+            python scripts/experiments/simple_mask_propagate/inference_merge_class.py\
                 --selected_class 1 9 \
                 --checkpoint {model_path} \
-                --output_dir {output_dir} {eval_cmd}
+                --output_dir {output_dir} && {eval_cmd}
             """
             pass
         print(run_inference_cmd)
