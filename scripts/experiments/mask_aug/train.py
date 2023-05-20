@@ -37,7 +37,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 IS_DEBUG = False
-NAME = "mask-drop"
+NAME = "mask-aug"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -64,12 +64,13 @@ def config():
 
     logdir = f"runs/{NAME}-{TIME}"
     custom_model_path = None
-    class_selected = [
-        FLARE22_LABEL_ENUM.LIVER.value,
-        FLARE22_LABEL_ENUM.GALLBLADDER.value,
-        FLARE22_LABEL_ENUM.IVC.value,
-        FLARE22_LABEL_ENUM.RIGHT_KIDNEY.value,
-    ]
+    # class_selected = [
+    #     FLARE22_LABEL_ENUM.LIVER.value,
+    #     FLARE22_LABEL_ENUM.GALLBLADDER.value,
+    #     FLARE22_LABEL_ENUM.IVC.value,
+    #     FLARE22_LABEL_ENUM.RIGHT_KIDNEY.value,
+    # ]
+    class_selected = None
     aug_dict = {
         FLARE22_LABEL_ENUM.LIVER.value: {
             "key": "one-block-drop",
@@ -207,8 +208,6 @@ def run_evaluate(sam_train: SamTrain, device: str, class_selected) -> dict:
         is_debug=IS_DEBUG,
         device=device,
         class_selected=class_selected,
-        allow_augmentation=[],
-        augmentation_prop=0.0,
     )
     dataset.preload()
     return evaluate(sam_train, dataset)

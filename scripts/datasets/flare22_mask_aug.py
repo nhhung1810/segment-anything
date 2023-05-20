@@ -340,15 +340,31 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 if __name__ == "__main__":
     sam = load_model()
     sam.to("cuda:0")
+    aug_dict = {
+        FLARE22_LABEL_ENUM.LIVER.value: {
+            "key": "one-block-drop",
+            "max_crop_ratio": 0.5,
+            "augmentation_prop": 0.5,
+        },
+        FLARE22_LABEL_ENUM.GALLBLADDER.value: {
+            "key": "pixel-drop",
+            "drop_out_prop": 0.2,
+            "augmentation_prop": 0.5,
+        },
+        FLARE22_LABEL_ENUM.IVC.value: {
+            "key": "pixel-drop",
+            "drop_out_prop": 0.4,
+            "augmentation_prop": 0.5,
+        },
+    }
     dataset = FLARE22_MaskAug(
-        cache_name=FLARE22_MaskAug.TRAIN_CACHE_NAME,
-        metadata_path=TRAIN_METADATA,
+        cache_name=FLARE22_MaskAug.VAL_CACHE_NAME,
+        metadata_path=VAL_METADATA,
         is_debug=False,
         pre_trained_sam=sam,
         device=sam.device,
-        aug_dict=[FLARE22_LABEL_ENUM.LIVER.value],
-        augmentation_prop=1.0,
-        class_selected=[1],
+        aug_dict=aug_dict
+
     )
     dataset.preprocess()
     dataset.preload()

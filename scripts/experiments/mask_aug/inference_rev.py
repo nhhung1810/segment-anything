@@ -1,7 +1,6 @@
 from glob import glob
 import os
 from typing import Dict, List, Optional, Tuple
-from git import CacheError
 import numpy as np
 from torch import Tensor
 import torch
@@ -13,30 +12,36 @@ from scripts.datasets.constant import (
     TRAIN_NON_PROCESSED,
     TEST_NON_PROCESSED,
 )
-from scripts.datasets.flare22_simple_mask_propagate import FLARE22_SimpleMaskPropagate
+from scripts.datasets.flare22_mask_aug import FLARE22_MaskAug
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
-from scripts.render.render import Renderer
 from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 
 from scripts.tools.evaluation.loading import post_process
 from scripts.utils import make_directory, pick
 from segment_anything.build_sam import sam_model_registry
+from segment_anything.modeling import sam
 from segment_anything.modeling.sam import Sam
 from scripts.losses.loss import DiceLoss
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 
 from segment_anything.utils.amg import calculate_stability_score
+from loguru import logger
 
 
-CACHE_DIR = f"{DATASET_ROOT}/{FLARE22_SimpleMaskPropagate.VAL_CACHE_NAME}/"
+CACHE_DIR = f"{DATASET_ROOT}/{FLARE22_MaskAug.VAL_CACHE_NAME}/reverse"
 LEGEND_DICT = {
     value.value: value.name.lower().replace("_", " ") for value in FLARE22_LABEL_ENUM
 }
 
 DICE_FN = DiceLoss(activation=None, reduction="none")
 
+logger.remove()
+logger.add(
+    "inference-log.txt",
+    format="<lvl>[{time:DD:MMM:YY HH:mm:ss}] - [{level}] - {message}</lvl>",
+)
 
 def load_model(model_path, device=DEFAULT_DEVICE) -> Sam:
     model: Sam = sam_model_registry["vit_b"](
@@ -151,6 +156,7 @@ def frame_inference(
     previous_merged_mask: np.ndarray = None,
     device: str = DEFAULT_DEVICE,
     dice_with: str = "prev",
+    is_init_dict: Dict[int, bool] = {},
 ):
     if cache_frame is None:
         img_emb, original_size, input_size = sam_train.prepare_img(image=img)
@@ -165,20 +171,21 @@ def frame_inference(
     starts, ends = class_appearance_range
     class_pred_list = {}
     for class_num in selected_class:
-        if frame_idx not in range(int(starts[class_num]), int(ends[class_num])):
+        if frame_idx not in range(int(starts[class_num]), int(ends[class_num] + 1)):
             class_pred_list[class_num] = torch.zeros(original_size, device=device)
             continue
 
         mask_pred = class_inference(
-            sam_train,
-            mask,
-            previous_merged_mask,
-            device,
-            dice_with,
-            img_emb,
-            original_size,
-            input_size,
-            class_num,
+            sam_train=sam_train,
+            mask=mask,
+            previous_merged_mask=previous_merged_mask,
+            device=device,
+            dice_with=dice_with,
+            img_emb=img_emb,
+            original_size=original_size,
+            input_size=input_size,
+            class_num=class_num,
+            is_init_dict=is_init_dict,
         )
         class_pred_list[class_num] = mask_pred
         pass
@@ -197,49 +204,41 @@ def class_inference(
     original_size: Tuple[int, int],
     input_size: Tuple[int, int],
     class_num: int,
+    is_init_dict: Dict[int, bool],
 ):
     class_mask = torch.as_tensor(mask == class_num)
-    if False:
-        # if previous_merged_mask is None or (not class_mask.any()):
-        coors, labels = make_point_from_mask(class_mask)
-        coords_torch, labels_torch, _, _ = sam_train.prepare_prompt(
-            original_size=original_size,
-            point_coords=coors,
-            point_labels=labels,
-        )
 
-        mask_pred, _, _ = sam_train.predict_torch(
-            image_emb=img_emb,  # 1, 256, 64, 64
-            input_size=input_size,
-            original_size=original_size,
-            multimask_output=True,
-            # Eval need no logits
-            return_logits=True,
-            point_coords=coords_torch,
-            point_labels=labels_torch,
-        )
-        pass
-    else:
-        # There are no previous mask for this class -> use the ground truth
-        if previous_merged_mask is None:
+    # There are no previous mask for this class -> use the ground truth
+    if previous_merged_mask is None:
+        previous_mask = mask == class_num
+    # So if the previous-merge-mask dont have the class -> 2 cases:
+    elif not (previous_merged_mask == class_num).any():
+        # no init yet -> allow to take the GT
+        if not is_init_dict.get(class_num, False):
             previous_mask = mask == class_num
-        elif not (previous_merged_mask == class_num).any():
-            previous_mask = mask == class_num
+            # record the init state
+            is_init_dict[class_num] = True
+            pass
         else:
+            logger.warning(f"Detect diminished at {class_num}")
             previous_mask = previous_merged_mask == class_num
-        _, _, _, mask_input_torch = sam_train.prepare_prompt(
-            original_size=original_size, mask_input=previous_mask[None, ...]
-        )
+            pass
+    else:
+        previous_mask = previous_merged_mask == class_num
+        pass
+    _, _, _, mask_input_torch = sam_train.prepare_prompt(
+        original_size=original_size, mask_input=previous_mask[None, ...]
+    )
 
-        mask_pred, _, _ = sam_train.predict_torch(
-            image_emb=img_emb,  # 1, 256, 64, 64
-            input_size=input_size,
-            original_size=original_size,
-            multimask_output=True,
-            # Get the logit to compute the stability
-            return_logits=False,
-            mask_input=mask_input_torch,
-        )
+    mask_pred, _, _ = sam_train.predict_torch(
+        image_emb=img_emb,  # 1, 256, 64, 64
+        input_size=input_size,
+        original_size=original_size,
+        multimask_output=True,
+        # Get the logit to compute the stability
+        return_logits=False,
+        mask_input=mask_input_torch,
+    )
 
     # Dice loss -> take the smallest (the smaller the better)
     chosen_idx, _ = pick_best_mask(
@@ -287,9 +286,10 @@ def inference(
         cache_volume = torch_try_load(cache_volume_path, device=device)
         predict_volume = []
         previous_mask = None
+        is_init_dict: Dict[int, bool] = {}
         for idx in tqdm(
-            range(volumes.shape[0]),
-            desc="Inference frame by frame...",
+            range(volumes.shape[0] - 1, -1, -1),
+            desc="Inference frame by frame (in reverse)...",
             leave=False,
             total=volumes.shape[0],
         ):
@@ -307,6 +307,7 @@ def inference(
                 previous_merged_mask=previous_mask,
                 device=device,
                 cache_frame=cache_frame,
+                is_init_dict=is_init_dict,
             )
 
             previous_mask = merged_prediction
@@ -315,6 +316,7 @@ def inference(
             cache_volume[idx] = cache_frame
             pass
         # Pack all prediction into volume
+        predict_volume = predict_volume[::-1]
         predict_volume = np.stack(predict_volume, axis=0)
         # new shape=[H, W, T]
         predict_volume = predict_volume.transpose(1, 2, 0).astype(np.uint8)
