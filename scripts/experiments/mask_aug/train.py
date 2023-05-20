@@ -64,13 +64,13 @@ def config():
 
     logdir = f"runs/{NAME}-{TIME}"
     custom_model_path = None
-    # class_selected = [
-    #     FLARE22_LABEL_ENUM.LIVER.value,
-    #     FLARE22_LABEL_ENUM.GALLBLADDER.value,
-    #     FLARE22_LABEL_ENUM.IVC.value,
-    #     FLARE22_LABEL_ENUM.RIGHT_KIDNEY.value,
-    # ]
-    class_selected = None
+    class_selected = [
+        FLARE22_LABEL_ENUM.LIVER.value,
+        FLARE22_LABEL_ENUM.GALLBLADDER.value,
+        FLARE22_LABEL_ENUM.IVC.value,
+        FLARE22_LABEL_ENUM.RIGHT_KIDNEY.value,
+    ]
+    # class_selected = None
     aug_dict = {
         FLARE22_LABEL_ENUM.LIVER.value: {
             "key": "one-block-drop",

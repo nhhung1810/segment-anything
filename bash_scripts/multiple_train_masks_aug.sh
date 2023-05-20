@@ -7,18 +7,13 @@ python scripts/experiments/mask_aug/train.py with \
    evaluate_epoch=10 \
    save_epoch=10
 
-# First mask-prop trained with lr=6e-4
-# python scripts/experiments/mask_aug/train.py with \
-#     learning_rate=6e-4 \
-#     custom_model_path="runs/mask-prop-230509-005503/model-100.pt" \
-#     n_epochs=300 \
-#     evaluate_epoch=10 \
-#     save_epoch=10
+# First mask-prop trained with lr=6e-5, 
+# class-focus init inside the train code
+python scripts/experiments/mask_aug/train.py with \
+    learning_rate=6e-5 \
+    custom_model_path="runs/mask-aug-230520-140411/model-300.pt" \
+    n_epochs=300 \
+    evaluate_epoch=10 \
+    save_epoch=10
 
-# # Same as above, but train from a one-point 
-# python scripts/experiments/mask_aug/train.py with \
-#     learning_rate=6e-4 \
-#     custom_model_path="runs/mask-prop-230511-153918/model-100.pt"\
-#     n_epochs=300 \
-#     evaluate_epoch=10 \
-#     save_epoch=10
+
