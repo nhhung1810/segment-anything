@@ -28,7 +28,7 @@ from sacred.observers import FileStorageObserver
 from scripts.datasets.constant import FLARE22_LABEL_ENUM, TRAIN_METADATA, VAL_METADATA
 
 # Internal
-from scripts.datasets.flare22_simple_mask_propagate import FLARE22_SimpleMaskPropagate
+from scripts.datasets.flare22_mask_drop import FLARE22_MaskDrop
 from scripts.experiments.simple_mask_propagate.evaluate import evaluate
 from scripts.losses.loss import MultimaskSamLoss
 from scripts.sam_train import SamTrain
@@ -37,7 +37,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 IS_DEBUG = False
-NAME = "mp-focus"
+NAME = "mask-drop"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -68,10 +68,13 @@ def config():
         FLARE22_LABEL_ENUM.LIVER.value,
         FLARE22_LABEL_ENUM.GALLBLADDER.value,
         FLARE22_LABEL_ENUM.IVC.value,
-        FLARE22_LABEL_ENUM.RIGHT_KIDNEY.value
+        FLARE22_LABEL_ENUM.RIGHT_KIDNEY.value,
     ]
-    n_epochs = 100
-    save_epoch = 5
+    augment_organ_list = [FLARE22_LABEL_ENUM.LIVER.value]
+    augment_prop = 0.5
+
+    n_epochs = 300
+    save_epoch = 20
     evaluate_epoch = 10
 
     gradient_accumulation_step = 4
@@ -91,15 +94,21 @@ def config():
 
 @ex.capture
 def make_dataset(
-    device, batch_size, class_selected
-) -> Tuple[FLARE22_SimpleMaskPropagate, DataLoader]:
+    device,
+    batch_size,
+    class_selected,
+    augment_organ_list,
+    augment_prop,
+) -> Tuple[FLARE22_MaskDrop, DataLoader]:
     # Save GPU by host the dataset on cpu only
-    dataset = FLARE22_SimpleMaskPropagate(
+    dataset = FLARE22_MaskDrop(
         metadata_path=TRAIN_METADATA,
-        cache_name=FLARE22_SimpleMaskPropagate.TRAIN_CACHE_NAME,
+        cache_name=FLARE22_MaskDrop.TRAIN_CACHE_NAME,
         is_debug=IS_DEBUG,
         device=device,
         class_selected=class_selected,
+        allow_augmentation=augment_organ_list,
+        augmentation_prop=augment_prop,
     )
     dataset.preprocess()
     dataset.preload()
@@ -107,9 +116,9 @@ def make_dataset(
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
     # Make sure that the evaluation dataset also work
-    FLARE22_SimpleMaskPropagate(
+    FLARE22_MaskDrop(
         metadata_path=VAL_METADATA,
-        cache_name=FLARE22_SimpleMaskPropagate.VAL_CACHE_NAME,
+        cache_name=FLARE22_MaskDrop.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device="cpu",
         class_selected=class_selected,
@@ -182,12 +191,14 @@ def checkpoint(model: Sam, device: str, save_path: str):
 
 @ex.capture
 def run_evaluate(sam_train: SamTrain, device: str, class_selected) -> dict:
-    dataset = FLARE22_SimpleMaskPropagate(
+    dataset = FLARE22_MaskDrop(
         metadata_path=VAL_METADATA,
-        cache_name=FLARE22_SimpleMaskPropagate.VAL_CACHE_NAME,
+        cache_name=FLARE22_MaskDrop.VAL_CACHE_NAME,
         is_debug=IS_DEBUG,
         device=device,
         class_selected=class_selected,
+        allow_augmentation=[],
+        augmentation_prop=0.0,
     )
     dataset.preload()
     return evaluate(sam_train, dataset)
@@ -210,7 +221,7 @@ def train(
     sam_train, optimizer, scheduler, loss_fnc = make_model()
 
     assert isinstance(sam_train, SamTrain), ""
-    assert isinstance(train_dataset, FLARE22_SimpleMaskPropagate), ""
+    assert isinstance(train_dataset, FLARE22_MaskDrop), ""
     assert isinstance(optimizer, Optimizer), ""
     assert isinstance(scheduler, StepLR), ""
     assert isinstance(loss_fnc, MultimaskSamLoss), ""

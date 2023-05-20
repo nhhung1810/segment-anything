@@ -1,10 +1,8 @@
 from collections import defaultdict
+from glob import glob
 import json
 import os
-from pydoc import pathdirs
-import subprocess
 from typing import List
-import natsort
 import numpy as np
 
 from torchvision.transforms.functional import resize, to_pil_image  # type: ignore
@@ -13,19 +11,14 @@ from tqdm import tqdm
 
 from scripts.datasets.constant import (
     IMAGE_TYPE,
+    TEST_NON_PROCESSED,
     TRAIN_NON_PROCESSED,
-    VAL_METADATA,
-    FLARE22_LABEL_ENUM,
 )
-from scripts.datasets.flare22_loader import FileLoader
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.experiments.simple_mask_propagate.inference import find_organ_range
-from scripts.render import Renderer
-from scripts.utils import load_file_npz, load_img, make_directory, omit
-from segment_anything.utils.transforms import ResizeLongestSide
 
 
-PATH = "/dataset/FLARE22-version1"
+PATH = "./dataset/FLARE22-version1"
 VAL_MASK = f"{PATH}/ValMask"
 VAL_IMAGE = f"{PATH}/ValImageProcessed"
 
@@ -38,7 +31,7 @@ def get_all_organ_range(masks):
         ends.append(end_idx)
 
     # Padding zero for background pixel
-    return np.array([0, *starts], np.int32), np.array([0, *ends], np.int32)
+    return [0, *starts], [0, *ends]
 
 
 def resize_to(img: np.ndarray, target_size):
@@ -98,6 +91,8 @@ def visualize(
             pass
 
         starts, ends = get_all_organ_range(masks)
+        if None in starts:
+            continue
         all_point_data[patient_name] = {
             class_num: [
                 float(starts[class_num] / volumes.shape[0]),
@@ -107,7 +102,7 @@ def visualize(
         }
         for idx in tqdm(
             range(volumes.shape[0]),
-            desc="Frame render...",
+            desc="Run EDA extraction...",
             total=volumes.shape[0],
             leave=False,
         ):
@@ -125,10 +120,10 @@ def visualize(
         all_area_data[patient_name] = area_data
         # break
 
-    with open(f"all_area_data-{direction}.json", "w") as out:
+    with open(f"train-all_area_data-{direction}.json", "w") as out:
         json.dump(all_area_data, out)
 
-    with open(f"all_point_data-{direction}.json", "w") as out:
+    with open(f"train-all_point_data-{direction}.json", "w") as out:
         json.dump(all_point_data, out)
 
     pass
@@ -138,6 +133,10 @@ if __name__ == "__main__":
     image_dir = f"{TRAIN_NON_PROCESSED}/images"
     label_dir = f"{TRAIN_NON_PROCESSED}/labels"
     images_path: List[str] = sorted(os.listdir(image_dir))
+    valname = os.listdir(f"{VAL_MASK}")
+    images_path = filter(lambda name: not (".cache" in name), images_path)
+
+    images_path = [p for p in images_path if p.replace(".nii.gz", "") not in valname]
     labels_path = [
         os.path.join(label_dir, p.replace("_0000.nii.gz", ".nii.gz"))
         for p in images_path
@@ -145,7 +144,7 @@ if __name__ == "__main__":
     images_path = [os.path.join(image_dir, p) for p in images_path]
 
     framerate = 10
-    direction = "W"
+    direction = "T"
     visualize(
         images=images_path, gts=labels_path, framerate=framerate, direction=direction
     )

@@ -12,6 +12,7 @@ from scripts.datasets.constant import (
     TRAIN_METADATA,
     VAL_METADATA,
 )
+import albumentations as A
 from typing import Dict, List, Optional
 from torch.utils.data import Dataset, DataLoader
 from scripts.sam_train import SamTrain
@@ -95,11 +96,11 @@ class FileLoader:
         pass
 
 
-class FLARE22_SimpleMaskPropagate(Dataset):
+class FLARE22_MaskDrop(Dataset):
     # FOR DEBUG
     LIMIT = 20
-    TRAIN_CACHE_NAME = "flare22-simple-mask-propagate/train"
-    VAL_CACHE_NAME = "flare22-simple-mask-propagate/validation"
+    TRAIN_CACHE_NAME = "flare22-mask-drop/train"
+    VAL_CACHE_NAME = "flare22-mask-drop/validation"
 
     def __init__(
         self,
@@ -110,6 +111,8 @@ class FLARE22_SimpleMaskPropagate(Dataset):
         is_debug: bool = False,
         device: str = "cpu",
         class_selected: List[int] = None,
+        allow_augmentation: List[int] = [],
+        augmentation_prop: float = 0.5,
     ) -> None:
         super().__init__()
         # For preprocess data
@@ -117,6 +120,9 @@ class FLARE22_SimpleMaskPropagate(Dataset):
         self.class_selected = class_selected or list(range(1, 14))
         self.pre_trained_sam = pre_trained_sam
         self.dataset_root = dataset_root
+        self.allow_augmentation = allow_augmentation
+        self.augmentation_prop = augmentation_prop
+        self.max_crop_ratio = 0.5
 
         if pre_trained_sam:
             self.pre_trained_sam.eval()
@@ -151,11 +157,43 @@ class FLARE22_SimpleMaskPropagate(Dataset):
         img_emb = data["img_emb"][0]
         mask = data["mask"]
         previous_mask = data["previous_mask"]
+        class_number = data["class_number"]
+        if int(class_number) in self.allow_augmentation:
+            previous_mask = self.drop_mask(previous_mask)
+            pass
         return dict(
             img_emb=img_emb.to(self.device),
             mask=mask.to(self.device),
             previous_mask=previous_mask.to(self.device),
         )
+    
+    def drop_mask(self, previous_mask: Tensor):
+        coors = torch.argwhere(previous_mask)
+        if coors.shape[0] == 0:
+            return previous_mask
+        xs = coors[:, 1]
+        ys = coors[:, 0]
+        top_left = [xs.min(), ys.min()]
+        right_bottom = [xs.max(), ys.max()]
+        w, h = [right_bottom[0] - top_left[0], right_bottom[1] - top_left[1]]
+        max_crop = int(min(w, h) * self.max_crop_ratio)
+        if max_crop == 0: 
+            return previous_mask
+        
+        drop_fn = A.CoarseDropout(
+            max_holes=1,
+            max_height=int(max_crop),
+            max_width=int(max_crop),
+            fill_value=0.0,
+            p=self.augmentation_prop,
+        )
+        # Sub-region augmentation only
+        y_slice = slice(top_left[1], right_bottom[1])
+        x_slice = slice(top_left[0], right_bottom[0])
+        sub_mask = previous_mask[y_slice, x_slice]
+        sub_mask = drop_fn(image=sub_mask.cpu().numpy())["image"]
+        previous_mask[y_slice, x_slice] = torch.as_tensor(sub_mask)
+        return previous_mask
 
     def __len__(self):
         return len(self.dataset)
@@ -282,7 +320,12 @@ class FLARE22_SimpleMaskPropagate(Dataset):
             if previous_mask is None:
                 continue
             self.dataset.append(
-                {**embedding, "mask": mask["mask"], "previous_mask": previous_mask}
+                {
+                    **embedding,
+                    "mask": mask["mask"],
+                    "previous_mask": previous_mask,
+                    "class_number": class_number,
+                }
             )
         pass
 
@@ -322,17 +365,20 @@ def load_model(checkpoint="./sam_vit_b_01ec64.pth", checkpoint_type="vit_b") -> 
 if __name__ == "__main__":
     sam = load_model()
     sam.to("cuda:0")
-    FLARE22_SimpleMaskPropagate.LIMIT = 20
-    dataset = FLARE22_SimpleMaskPropagate(
-        cache_name=FLARE22_SimpleMaskPropagate.VAL_CACHE_NAME,
-        metadata_path=VAL_METADATA,
+    dataset = FLARE22_MaskDrop(
+        cache_name=FLARE22_MaskDrop.TRAIN_CACHE_NAME,
+        metadata_path=TRAIN_METADATA,
         is_debug=False,
         pre_trained_sam=sam,
         device=sam.device,
+        allow_augmentation=[FLARE22_LABEL_ENUM.LIVER.value],
+        augmentation_prop=1.0,
+        class_selected=[1]
     )
     dataset.preprocess()
     dataset.preload()
     print(len(dataset))
+    import matplotlib.pyplot as plt
     loader = DataLoader(dataset=dataset, batch_size=2, shuffle=True, drop_last=True)
     for idx, batch in enumerate(loader):
         for k, v in batch.items():

@@ -8,7 +8,7 @@ from scripts.constants import FLARE22_LABEL_ENUM
 from scripts.datasets.constant import DATASET_ROOT, IMAGE_TYPE, TRAIN_NON_PROCESSED
 from scripts.datasets.flare22_simple_mask_propagate import FLARE22_SimpleMaskPropagate
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
-from scripts.render import Renderer
+from scripts.render.render import Renderer
 from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 

@@ -4,6 +4,11 @@ import subprocess
 from typing import List
 import natsort
 import numpy as np
+import albumentations as T
+from torch import Tensor
+import torch
+import matplotlib.pyplot as plt
+
 
 from torchvision.transforms.functional import resize, to_pil_image  # type: ignore
 from tqdm import tqdm
@@ -11,6 +16,7 @@ from tqdm import tqdm
 
 from scripts.datasets.constant import (
     IMAGE_TYPE,
+    TEST_NON_PROCESSED,
     TRAIN_NON_PROCESSED,
     VAL_METADATA,
     FLARE22_LABEL_ENUM,
@@ -18,7 +24,7 @@ from scripts.datasets.constant import (
 from scripts.datasets.flare22_loader import FileLoader
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.experiments.simple_mask_propagate.inference import find_organ_range
-from scripts.render import Renderer
+from scripts.render.render import Renderer
 from scripts.utils import load_file_npz, load_img, make_directory, omit
 from segment_anything.utils.transforms import ResizeLongestSide
 
@@ -26,6 +32,34 @@ from segment_anything.utils.transforms import ResizeLongestSide
 PATH = "/dataset/FLARE22-version1"
 VAL_MASK = f"{PATH}/ValMask"
 VAL_IMAGE = f"{PATH}/ValImageProcessed"
+
+
+def mask_drop(mask: Tensor, class_num: int, max_crop_ratio=0.5):
+    coors = np.argwhere(mask == class_num)
+    if coors.shape[0] == 0:
+        return mask
+    xs = coors[:, 1]
+    ys = coors[:, 0]
+    top_left = [xs.min(), ys.min()]
+    right_bottom = [xs.max(), ys.max()]
+    w, h = [right_bottom[0] - top_left[0], right_bottom[1] - top_left[1]]
+
+    # Define the max_crop
+    max_crop = int(min(w, h) * max_crop_ratio)
+
+    drop_fn = T.CoarseDropout(
+        max_holes=1,
+        max_height=int(max_crop),
+        max_width=int(max_crop),
+        fill_value=0.0,
+        always_apply=True,
+    )
+    y_slice = slice(top_left[1], right_bottom[1])
+    x_slice = slice(top_left[0], right_bottom[0])
+    sub_mask = mask[y_slice, x_slice]
+    sub_mask = drop_fn(image=sub_mask)["image"]
+    mask[y_slice, x_slice] = sub_mask
+    return mask
 
 
 def get_all_organ_range(masks):
@@ -77,7 +111,7 @@ def visualize(
         zip(images, gts), total=len(images), desc="Inference for patient..."
     ):
         patient_name = os.path.basename(image_file).replace(".nii.gz", "")
-        _dir = make_directory(f"./runs/visualize/{patient_name}")
+        _dir = make_directory(f"./runs/visualize/train-case/{patient_name}")
 
         # shape = [T, H, W]
         volumes, masks = preprocessor.run_with_config(
@@ -103,6 +137,7 @@ def visualize(
             # Convert into RBG
             img = volumes[idx, ...]
             mask = masks[idx, ...]
+            mask = mask_drop(mask, 1)
             bboxes = calculate_bbox(mask)
             if direction == "H":
                 target_size = (img.shape[1] // 4, img.shape[1] // 8)
@@ -140,6 +175,7 @@ if __name__ == "__main__":
     image_dir = f"{TRAIN_NON_PROCESSED}/images"
     label_dir = f"{TRAIN_NON_PROCESSED}/labels"
     images_path: List[str] = sorted(os.listdir(image_dir))
+    images_path = [p for p in images_path if "cache" not in p]
     labels_path = [
         os.path.join(label_dir, p.replace("_0000.nii.gz", ".nii.gz"))
         for p in images_path

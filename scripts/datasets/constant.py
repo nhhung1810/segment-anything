@@ -2,6 +2,7 @@ import torch
 from enum import Enum
 
 DEFAULT_DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
+SECOND_DEVICE = "cuda:1" if torch.cuda.is_available() else "cpu"
 
 
 class FLARE22_LABEL_ENUM(Enum):
@@ -30,6 +31,7 @@ class IMAGE_TYPE(Enum):
 # Respective to root
 DATASET_ROOT = "./dataset/FLARE22-version1/"
 TRAIN_NON_PROCESSED = "./dataset/FLARE22-version1/FLARE22_LabeledCase50"
+TEST_NON_PROCESSED = "./dataset/FLARE22-version1/ReleaseValGT-20cases"
 
 # Processed data
 TRAIN_PATH = "./dataset/FLARE22-version1/TrainImageProcessed"
