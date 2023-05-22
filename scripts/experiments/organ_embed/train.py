@@ -40,7 +40,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 IS_DEBUG = False
-NAME = "mask-aug"
+NAME = "organ-ctx"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -85,8 +85,10 @@ def config():
             "augmentation_prop": 0.5,
         },
     }
-    # 13 context for 13 organ
-    num_of_context = 13
+    # 13 context for 13 organ, 
+    # the first context will be omit 
+    # (can be interpreted as back ground)
+    num_of_context = 14
 
     n_epochs = 300
     save_epoch = 20
@@ -112,6 +114,7 @@ def make_dataset(
     device, batch_size, class_selected, aug_dict
 ) -> Tuple[FLARE22_MaskAug, DataLoader]:
     # Save GPU by host the dataset on cpu only
+    FLARE22_MaskAug.LIMIT = 30
     dataset = FLARE22_MaskAug(
         metadata_path=TRAIN_METADATA,
         cache_name=FLARE22_MaskAug.TRAIN_CACHE_NAME,
@@ -243,7 +246,9 @@ def train(
             mask: Tensor = batch["mask"]
             previous_mask: Tensor = batch["previous_mask"]
             class_number: Tensor = batch["class_number"]
-
+            # Flatten out
+            class_number = class_number.view(-1)
+            # Prepare the prompt
             _, _, _, mask_input_torch = sam_train.prepare_prompt(
                 original_size=original_size, mask_input=previous_mask
             )

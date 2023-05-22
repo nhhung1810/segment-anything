@@ -78,6 +78,7 @@ def evaluate(sam_train: ContextSamTrain, dataset: FLARE22_MaskAug, batch_size=8)
         mask: Tensor = batch["mask"]
         previous_mask: Tensor = batch["previous_mask"]
         class_number: Tensor = batch["class_number"]
+        class_number = class_number.view(-1)
 
         _, _, _, mask_input_torch = sam_train.prepare_prompt(
             original_size=original_size, mask_input=previous_mask

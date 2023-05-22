@@ -38,10 +38,13 @@ class ContextPromptEncoder(PromptEncoder):
     ) -> Tuple[Tensor, Tensor]:
         sparse_embeddings, dense_embeddings = super().forward(points, boxes, masks)
 
-        if context_number is None or context_number >= self.n_context:
+        if context_number is None:
             return sparse_embeddings, dense_embeddings
 
         mask_context = self.context_embedding(context_number)
+        mask_context = mask_context[..., None, None].expand(
+            -1, -1, self.image_embedding_size[0], self.image_embedding_size[1]
+        )
         dense_embeddings = dense_embeddings + mask_context
         return sparse_embeddings, dense_embeddings
 
