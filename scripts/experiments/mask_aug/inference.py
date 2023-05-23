@@ -5,12 +5,14 @@ import numpy as np
 from torch import Tensor
 import torch
 from tqdm import tqdm
-from scripts.constants import FLARE22_LABEL_ENUM
+
+# from scripts.constants import FLARE22_LABEL_ENUM
 from scripts.datasets.constant import (
     DATASET_ROOT,
     IMAGE_TYPE,
     TRAIN_NON_PROCESSED,
     TEST_NON_PROCESSED,
+    FLARE22_LABEL_ENUM,
 )
 from scripts.datasets.flare22_mask_aug import FLARE22_MaskAug
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
@@ -42,6 +44,7 @@ logger.add(
     "inference-log.txt",
     format="<lvl>[{time:DD:MMM:YY HH:mm:ss}] - [{level}] - {message}</lvl>",
 )
+
 
 def load_model(model_path, device=DEFAULT_DEVICE) -> Sam:
     model: Sam = sam_model_registry["vit_b"](
