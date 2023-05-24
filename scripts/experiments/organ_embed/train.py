@@ -74,16 +74,16 @@ def config():
             "max_crop_ratio": 0.5,
             "augmentation_prop": 0.5,
         },
-        FLARE22_LABEL_ENUM.GALLBLADDER.value: {
-            "key": "pixel-drop",
-            "drop_out_prop": 0.2,
-            "augmentation_prop": 0.5,
-        },
-        FLARE22_LABEL_ENUM.IVC.value: {
-            "key": "pixel-drop",
-            "drop_out_prop": 0.4,
-            "augmentation_prop": 0.5,
-        },
+        # FLARE22_LABEL_ENUM.GALLBLADDER.value: {
+        #     "key": "pixel-drop",
+        #     "drop_out_prop": 0.2,
+        #     "augmentation_prop": 0.5,
+        # },
+        # FLARE22_LABEL_ENUM.IVC.value: {
+        #     "key": "pixel-drop",
+        #     "drop_out_prop": 0.4,
+        #     "augmentation_prop": 0.5,
+        # },
     }
     # 13 context for 13 organ, 
     # the first context will be omit 

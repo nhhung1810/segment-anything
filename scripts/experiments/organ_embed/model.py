@@ -142,7 +142,7 @@ def build_sam_context_vit_b(
     custom=None,
     num_of_context=1,
     check_for_context_weight: bool = False,
-):
+) -> ContextSam:
     sam = _build_sam(
         encoder_embed_dim=768,
         encoder_depth=12,

@@ -2,7 +2,7 @@ from glob import glob
 import os
 from typing import Dict, List, Optional, Tuple
 import numpy as np
-from torch import Tensor
+from torch import LongTensor, Tensor
 import torch
 from tqdm import tqdm
 from scripts.constants import FLARE22_LABEL_ENUM
@@ -14,6 +14,7 @@ from scripts.datasets.constant import (
 )
 from scripts.datasets.flare22_mask_aug import FLARE22_MaskAug
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
+from scripts.experiments.organ_embed.model import ContextSam, ContextSamTrain
 from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 
@@ -195,7 +196,7 @@ def frame_inference(
 
 
 def class_inference(
-    sam_train: SamTrain,
+    sam_train: ContextSamTrain,
     mask: np.ndarray,
     previous_merged_mask: np.ndarray,
     device: str,
@@ -238,6 +239,7 @@ def class_inference(
         # Get the logit to compute the stability
         return_logits=False,
         mask_input=mask_input_torch,
+        context_numbers=LongTensor([int(class_num)]).to(device)
     )
 
     # Dice loss -> take the smallest (the smaller the better)
@@ -264,7 +266,7 @@ def torch_try_load(path: str, device: str) -> dict:
 def inference(
     images: List[str],
     gts: List[str],
-    sam_train: SamTrain,
+    sam_train: ContextSamTrain,
     inference_save_dir: str,
     selected_class: List[int],
     device: str,
@@ -377,13 +379,15 @@ parser.add_argument(
 )
 
 if __name__ == "__main__":
+    from scripts.experiments.organ_embed.model import build_sam_context_vit_b
     args = parser.parse_args()
     device = f"cuda:{args.cuda}" if "cuda" in DEFAULT_DEVICE else DEFAULT_DEVICE
 
-    run_path = "mask-prop-230509-005503"
-    model_path = args.checkpoint or f"runs/{run_path}/model-100.pt"
-    model = load_model(model_path, device)
-    sam_train = SamTrain(sam_model=model)
+    run_path = "organ-ctx-230522-213306"
+    model_path = args.checkpoint or f"runs/{run_path}/model-300.pt"
+    model: ContextSam = build_sam_context_vit_b(checkpoint="./sam_vit_b_01ec64.pth", custom=model_path, num_of_context=14, check_for_context_weight=True)
+    model.to(device)
+    sam_train = ContextSamTrain(model)
 
     inference_save_dir = args.output_dir
     input_dir = args.input_dir
