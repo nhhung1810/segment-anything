@@ -150,9 +150,9 @@ if __name__ == "__main__":
     pass
 
 
-def torch_try_load(path: str, device: str) -> dict:
+def torch_try_load(path: str, device: str, default_return={}) -> dict:
     try:
         return torch.load(path, map_location=device)
     except Exception as msg:
         pass
-    return {}
+    return default_return
