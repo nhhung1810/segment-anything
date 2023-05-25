@@ -96,7 +96,7 @@ class InferenceEngine:
         frame_idx: int,
         masks: np.ndarray,
         is_init_dict: Dict[int, bool],
-    ):
+    ) -> np.ndarray:
         class_pred_dict = {}
         for class_num in self.selected_class:
             if frame_idx not in range(starts[class_num], ends[class_num] + 1):
@@ -119,7 +119,7 @@ class InferenceEngine:
             pass
 
         merged_pred = merge_function(class_pred_dict)
-        return merged_pred
+        return merged_pred.detach().cpu().numpy().astype(np.uint8)
 
     def get_image_embedding(self, volume) -> CACHE_VOLUME_TYPE:
         volume_embedding = {}
@@ -274,18 +274,19 @@ parser.add_argument(
 
 def get_test_image(input_dir, label_dir):
     images_path: List[str] = sorted(glob(f"{input_dir}/*.nii.gz"))
-    images_path = [os.path.basename(p) for p in images_path if "0002" in p]
+    images_path = [os.path.basename(p) for p in images_path]
+    # images_path = [os.path.basename(p) for p in images_path if "0002" in p]
     # By some way, they don't have gallbladder, which i will omit for now
-    # images_path.remove("FLARETs_0006_0000.nii.gz")
-    # images_path.remove("FLARETs_0008_0000.nii.gz")
-    # images_path.remove("FLARETs_0021_0000.nii.gz")
-    # images_path.remove("FLARETs_0031_0000.nii.gz")
-    # images_path.remove("FLARETs_0033_0000.nii.gz")
-    # images_path.remove("FLARETs_0036_0000.nii.gz")
-    # images_path.remove("FLARETs_0038_0000.nii.gz")
-    # images_path.remove("FLARETs_0043_0000.nii.gz")
-    # images_path.remove("FLARETs_0044_0000.nii.gz")
-    # images_path.remove("FLARETs_0048_0000.nii.gz")
+    images_path.remove("FLARETs_0006_0000.nii.gz")
+    images_path.remove("FLARETs_0008_0000.nii.gz")
+    images_path.remove("FLARETs_0021_0000.nii.gz")
+    images_path.remove("FLARETs_0031_0000.nii.gz")
+    images_path.remove("FLARETs_0033_0000.nii.gz")
+    images_path.remove("FLARETs_0036_0000.nii.gz")
+    images_path.remove("FLARETs_0038_0000.nii.gz")
+    images_path.remove("FLARETs_0043_0000.nii.gz")
+    images_path.remove("FLARETs_0044_0000.nii.gz")
+    images_path.remove("FLARETs_0048_0000.nii.gz")
     labels_path = [
         os.path.join(label_dir, p.replace("_0000.nii.gz", ".nii.gz"))
         for p in images_path
@@ -307,7 +308,7 @@ if __name__ == "__main__":
     label_dir = args.label_dir
     selected_class = args.selected_class or list(range(1, 14))
     use_cache = args.use_cache
-    model_path = args.checkpoint or "runs/mask-prop-230509-005503/model-100.pt"
+    model_path = args.checkpoint or "runs/mask-liver-first-augment/mask-drop-230519-012732/model-170.pt"
 
     for c in selected_class:
         assert c in range(1, 14)

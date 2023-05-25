@@ -162,7 +162,7 @@ class FLARE22_MaskAug(Dataset):
             aug_fn = build_augmentation(
                 key=aug_config["key"], config=omit(aug_config, ["key"])
             )
-            previous_mask: Tensor = aug_fn(previous_mask)
+            previous_mask: Tensor = aug_fn(previous_mask.clone())
             pass
         return dict(
             img_emb=img_emb.to(self.device),
