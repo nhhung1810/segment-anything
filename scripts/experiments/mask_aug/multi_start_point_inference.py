@@ -31,27 +31,59 @@ class MultiPointInferenceEngine(InferenceEngine):
     def inference(self, image_file: str, gt_file: str):
         _, masks, cache_volume, [starts, ends] = self.load_volume(image_file, gt_file)
         # FIXME: this is just a skips
-        volumes = torch_try_load("volumes.pt", device="cpu", default_return=[])
-        if len(volumes) == 0:
-            for start_point in self.propose_keyframe(starts, ends):
-                predict_volume = self.inference_bidirection(
-                    masks=masks,
-                    cache_volume=cache_volume,
-                    start_point=start_point,
-                    starts=starts,
-                    ends=ends,
-                )
-                volumes.append(predict_volume)
-                pass
-            torch.save(volumes, "volumes.pt")
+        # volumes = torch_try_load("volumes.pt", device="cpu", default_return=[])
+        # proposal = self.propose_keyframe(starts, ends)
+        volumes = []
+        proposal = self.propose_keyframe(starts, ends)
+        for start_point in tqdm(
+            proposal, desc="Running ensemble...", total=len(proposal)
+        ):
+            predict_volume = self.inference_bidirection(
+                masks=masks,
+                cache_volume=cache_volume,
+                start_point=start_point,
+                starts=starts,
+                ends=ends,
+            )
+            volumes.append(predict_volume)
+            pass
 
         result = self.fusion(volumes)
-        # result = volumes[1]
         result = result.transpose(1, 2, 0).astype(np.uint8)
         post_process(pred=result, gt_file=gt_file, out_dir=self.inference_save_dir)
         pass
 
     def fusion(self, volumes: List[np.ndarray]) -> np.ndarray:
+        return self.fusion_with_voting(volumes=volumes)
+
+    def fusion_with_voting(self, volumes: List[np.ndarray]) -> np.ndarray:
+        assert (
+            len(volumes) % 2 != 0
+        ), "Voting only available with odd-ensemble, for simple tie break"
+        result = np.zeros(volumes[0].shape, dtype=np.uint8)
+        buffer = np.stack(volumes, axis=0)
+        for idx in range(volumes[0].shape[0]):
+            layers: np.ndarray = buffer[:, idx, :, :]
+            class_pred_dict = {}
+            # Merge between layer of the same-class
+            for class_num in self.selected_class:
+                class_layer: np.ndarray = (layers == class_num).astype(np.uint8)
+                # Odd-Voting, 2-3 vote counted as true, 1-0 vote count as false
+                class_layer = (
+                    np.sum(class_layer, axis=0, keepdims=False) > 1.0
+                ).astype(np.uint8)
+
+                class_pred_dict[class_num] = Tensor(class_layer, device="cpu")
+                pass
+            # Merge inter-class
+            merged_frame: np.ndarray = merge_function(
+                class_pred_list=class_pred_dict, device="cpu"
+            ).numpy()
+            result[idx] = merged_frame
+
+        return result
+
+    def fusion_with_union(self, volumes: List[np.ndarray]) -> np.ndarray:
         # Fusion multiple volume, frame by frame
         result = np.zeros(volumes[0].shape, dtype=np.uint8)
         # Layer by layer merging
@@ -78,19 +110,29 @@ class MultiPointInferenceEngine(InferenceEngine):
         return result
 
     def propose_keyframe(self, starts: np.ndarray, ends: np.ndarray) -> List[int]:
-        # return super().propose_keyframe(starts, ends)
         # Heuristic: zero and middle of liver?
         # middle of liver and middle of gall?
         return [
             # First point
             0,
-            # Middle liver point
+            # Middle gall point
+            int(
+                (
+                    starts[FLARE22_LABEL_ENUM.GALLBLADDER.value]
+                    + ends[FLARE22_LABEL_ENUM.GALLBLADDER.value]
+                )
+                * 0.5
+            ),
+            # 2/3 liver point
             int(
                 (
                     starts[FLARE22_LABEL_ENUM.LIVER.value]
-                    + ends[FLARE22_LABEL_ENUM.LIVER.value]
+                    + (
+                        ends[FLARE22_LABEL_ENUM.LIVER.value]
+                        - starts[FLARE22_LABEL_ENUM.LIVER.value]
+                    )
+                    * (2.0 / 3.0)
                 )
-                * 0.5
             ),
         ]
 
@@ -108,6 +150,7 @@ if __name__ == "__main__":
         args.checkpoint
         or "runs/mask-liver-first-augment/mask-drop-230519-012732/model-110.pt"
     )
+    selected_class = [1, 9]
     for c in selected_class:
         assert c in range(1, 14)
     class_name = [
