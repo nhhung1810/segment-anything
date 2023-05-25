@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import random
@@ -40,7 +40,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 IS_DEBUG = False
-NAME = "organ-ctx"
+NAME = "organ-ctx2"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -69,11 +69,11 @@ def config():
     custom_model_path = None
     class_selected = None
     aug_dict = {
-        FLARE22_LABEL_ENUM.LIVER.value: {
-            "key": "one-block-drop",
-            "max_crop_ratio": 0.5,
-            "augmentation_prop": 0.5,
-        },
+        # FLARE22_LABEL_ENUM.LIVER.value: {
+        #     "key": "one-block-drop",
+        #     "max_crop_ratio": 0.5,
+        #     "augmentation_prop": 0.5,
+        # },
         # FLARE22_LABEL_ENUM.GALLBLADDER.value: {
         #     "key": "pixel-drop",
         #     "drop_out_prop": 0.2,
@@ -90,9 +90,9 @@ def config():
     # (can be interpreted as back ground)
     num_of_context = 14
 
-    n_epochs = 300
-    save_epoch = 20
-    evaluate_epoch = 10
+    n_epochs = 400
+    save_epoch = 10
+    evaluate_epoch = 5
 
     gradient_accumulation_step = 4
 
@@ -102,8 +102,9 @@ def config():
 
     # Optim params
     learning_rate = 6e-4
-    learning_rate_decay_steps = 5
-    learning_rate_decay_rate = 0.98
+    # learning_rate_decay_steps = 5
+    learning_rate_decay_rate = 0.1
+    learning_rate_patience = 3
 
     ex.observers.append(FileStorageObserver.create(logdir))
     pass
@@ -144,12 +145,12 @@ def make_model(
     device,
     custom_model_path,
     learning_rate,
-    learning_rate_decay_steps,
     learning_rate_decay_rate,
+    learning_rate_patience,
     focal_gamma,
     focal_alpha,
     num_of_context,
-) -> Tuple[ContextSamTrain, Optimizer, StepLR, int]:
+) -> Tuple[ContextSamTrain, Optimizer, ReduceLROnPlateau, int]:
     model = build_sam_context_vit_b(
         checkpoint="./sam_vit_b_01ec64.pth",
         custom=custom_model_path,
@@ -169,8 +170,11 @@ def make_model(
     summary(model.prompt_encoder)
     summary(model.mask_decoder)
 
-    scheduler = StepLR(
-        optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode='max',
+        factor=learning_rate_decay_rate,
+        patience=learning_rate_patience,
     )
 
     context_sam_train = ContextSamTrain(sam_model=model)
@@ -230,7 +234,7 @@ def train(
     assert isinstance(sam_train, ContextSamTrain), ""
     assert isinstance(train_dataset, FLARE22_MaskAug), ""
     assert isinstance(optimizer, Optimizer), ""
-    assert isinstance(scheduler, StepLR), ""
+    assert isinstance(scheduler, ReduceLROnPlateau), ""
     assert isinstance(loss_fnc, MultimaskSamLoss), ""
 
     optimizer.zero_grad()
@@ -292,12 +296,12 @@ def train(
             "train/loss", np.array(one_batch_losses).mean(), global_step=batch_idx
         )
         writer.add_scalar(
-            "train/learning_rate", scheduler.get_last_lr()[0], global_step=batch_idx
+            "train/learning_rate", optimizer.param_groups[0]['lr'], global_step=batch_idx
         )
 
         # End 1 epoch
         # LR-scheduler run by epoch
-        scheduler.step()
+        # scheduler.step()
         pass
 
         # The idx from the above loop will be leak out of scope, this is python feat.
@@ -312,6 +316,8 @@ def train(
             metrics: dict = run_evaluate(sam_train=sam_train)
             for k, v in metrics.items():
                 writer.add_scalar(f"validation/{k}", v, global_step=batch_idx)
+
+            scheduler.step(metrics=metrics['dice/mean_of_best'])
             pass
 
         if batch_idx % save_epoch == 0:

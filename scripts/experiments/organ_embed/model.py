@@ -26,7 +26,10 @@ class ContextPromptEncoder(PromptEncoder):
             embed_dim, image_embedding_size, input_image_size, mask_in_chans, activation
         )
         self.n_context = n_context
-        self.context_embedding = nn.Embedding(n_context, embed_dim)
+        self.context_embedding = nn.Embedding(
+            # n_context, 64 x 64 represent the image-size
+            n_context, self.image_embedding_size[0] * self.image_embedding_size[1]
+        )
         pass
 
     def forward(
@@ -41,18 +44,15 @@ class ContextPromptEncoder(PromptEncoder):
         if context_number is None:
             return sparse_embeddings, dense_embeddings
 
-        mask_context = self.context_embedding(context_number)
-        mask_context = mask_context[..., None, None].expand(
-            -1, -1, self.image_embedding_size[0], self.image_embedding_size[1]
+        mask_context: Tensor = self.context_embedding(context_number)
+        mask_context = (
+            mask_context
+            .reshape(-1, self.image_embedding_size[0], self.image_embedding_size[1])
+            .unsqueeze(1)
+            .expand(-1, self.embed_dim, -1, -1)
         )
         dense_embeddings = dense_embeddings + mask_context
         return sparse_embeddings, dense_embeddings
-
-    def clone_no_mask_context(self):
-        with torch.no_grad():
-            for i in range(self.context_embedding.weight.shape[0]):
-                self.context_embedding.weight[i, :] = self.no_mask_embed.weight[0, :]
-        pass
 
 
 class ContextSam(Sam):
@@ -243,10 +243,6 @@ if __name__ == "__main__":
         num_of_context=13,
     )
     assert isinstance(sam_context.prompt_encoder, ContextPromptEncoder), f""
-    sam_context.prompt_encoder.clone_no_mask_context()
-    emb1 = sam_context.prompt_encoder.context_embedding.weight[1]
-    emb2 = sam_context.prompt_encoder.context_embedding.weight[2]
-    assert (emb1 - emb2 == 0.0).all(), f""
 
     context_train = ContextSamTrain(sam_model=sam_context)
 
