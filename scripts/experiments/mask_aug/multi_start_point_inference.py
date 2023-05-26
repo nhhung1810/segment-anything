@@ -170,8 +170,8 @@ if __name__ == "__main__":
     )
     make_directory(inference_save_dir)
     images_path, labels_path = get_test_image(input_dir, label_dir)
-    images_path = [p for p in images_path if "0002" in p]
-    labels_path = [p for p in labels_path if "0002" in p]
+    # images_path = [p for p in images_path if "0002" in p]
+    # labels_path = [p for p in labels_path if "0002" in p]
     model = load_model(model_path, device)
     sam_train = SamTrain(model)
     inference_engine = MultiPointInferenceEngine(

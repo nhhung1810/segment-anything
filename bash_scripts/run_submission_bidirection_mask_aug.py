@@ -71,13 +71,13 @@ if __name__ == "__main__":
             """ if not is_skip_eval else ":"
         if not is_custom_class:
             run_inference_cmd = f"""
-            python scripts/experiments/mask_aug/bidirection_inference.py\
+            python scripts/experiments/mask_aug/multi_start_point_inference.py\
                 --checkpoint {model_path} \
                 --output_dir {output_dir} && {eval_cmd}
             """
         else:
             run_inference_cmd = f"""
-            python scripts/experiments/mask_aug/bidirection_inference.py\
+            python scripts/experiments/mask_aug/multi_start_point_inference.py\
                 --selected_class 1 9 \
                 --checkpoint {model_path} \
                 --output_dir {output_dir} && {eval_cmd}
