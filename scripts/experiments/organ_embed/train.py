@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import random
 from scripts.experiments.organ_embed.model import (
+    ContextPromptEncoder,
     ContextSam,
     ContextSamTrain,
     build_sam_context_vit_b,
@@ -66,24 +67,25 @@ def config():
     batch_size = 16
 
     logdir = f"runs/{NAME}-{TIME}"
+    # custom_model_path = f"runs/organ-ctx2-230525-225746/model-400.pt"
     custom_model_path = None
     class_selected = None
     aug_dict = {
         # FLARE22_LABEL_ENUM.LIVER.value: {
         #     "key": "one-block-drop",
         #     "max_crop_ratio": 0.5,
-        #     "augmentation_prop": 0.5,
+        #     "augmentation_prop": 0.25,
         # },
         # FLARE22_LABEL_ENUM.GALLBLADDER.value: {
         #     "key": "pixel-drop",
         #     "drop_out_prop": 0.2,
-        #     "augmentation_prop": 0.5,
+        #     "augmentation_prop": 0.2,
         # },
-        # FLARE22_LABEL_ENUM.IVC.value: {
-        #     "key": "pixel-drop",
-        #     "drop_out_prop": 0.4,
-        #     "augmentation_prop": 0.5,
-        # },
+        # # FLARE22_LABEL_ENUM.IVC.value: {
+        # #     "key": "pixel-drop",
+        # #     "drop_out_prop": 0.2,
+        # #     "augmentation_prop": 0.2,
+        # # },
     }
     # 13 context for 13 organ, 
     # the first context will be omit 
@@ -91,7 +93,7 @@ def config():
     num_of_context = 14
 
     n_epochs = 400
-    save_epoch = 10
+    save_epoch = 5
     evaluate_epoch = 5
 
     gradient_accumulation_step = 4
@@ -103,8 +105,8 @@ def config():
     # Optim params
     learning_rate = 6e-4
     # learning_rate_decay_steps = 5
-    learning_rate_decay_rate = 0.1
-    learning_rate_patience = 3
+    learning_rate_decay_rate = 0.8
+    learning_rate_patience = 2
 
     ex.observers.append(FileStorageObserver.create(logdir))
     pass
@@ -158,6 +160,15 @@ def make_model(
         num_of_context=num_of_context,
     )
     model.to(device=device)
+
+    # Freezing
+    model.image_encoder.requires_grad_(False)
+    model.mask_decoder.requires_grad_(False)
+    assert isinstance(model.prompt_encoder, ContextPromptEncoder)
+    model.prompt_encoder.requires_grad_(False)
+    # Only turn on the mask-downscale and the context
+    model.prompt_encoder.mask_downscaling.requires_grad_(True)
+    model.prompt_encoder.context_embedding.requires_grad_(True)
 
     if custom_model_path is None:
         logger.warning("Initialize from pre-train")
