@@ -4,7 +4,7 @@ from tqdm import tqdm
 import numpy as np
 import os
 import torch
-from torch import Tensor
+from torch import LongTensor, Tensor
 from scripts.datasets.constant import (
     DATASET_ROOT,
     IMAGE_TYPE,
@@ -168,6 +168,7 @@ class FLARE22_MaskAug(Dataset):
             img_emb=img_emb.to(self.device),
             mask=mask.to(self.device),
             previous_mask=previous_mask.to(self.device),
+            class_number=LongTensor([int(class_number)]).to(self.device),
         )
 
     def __len__(self):
@@ -363,8 +364,7 @@ if __name__ == "__main__":
         is_debug=False,
         pre_trained_sam=sam,
         device=sam.device,
-        aug_dict=aug_dict
-
+        aug_dict=aug_dict,
     )
     dataset.preprocess()
     dataset.preload()
