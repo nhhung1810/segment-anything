@@ -54,7 +54,7 @@ class ImageData:
         assert self.image.ndim < 4, "Out of control"
         img = self.image.copy()
         if self.image.ndim == 2:
-            img = img[:, :, None]
+            img = img[:, :, None].repeat(3, axis=-1)
 
         if self.image.ndim == 3:
             assert (

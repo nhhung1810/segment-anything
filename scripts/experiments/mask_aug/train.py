@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import random
@@ -89,11 +89,10 @@ def config():
         },
     }
 
-    n_epochs = 300
+    n_epochs = 600
     save_epoch = 20
-    evaluate_epoch = 10
-
-    gradient_accumulation_step = 4
+    evaluate_epoch = 5
+    gradient_accumulation_step = 8
 
     # Model params
     focal_gamma = 2.0
@@ -101,8 +100,10 @@ def config():
 
     # Optim params
     learning_rate = 6e-6
-    learning_rate_decay_steps = 5
-    learning_rate_decay_rate = 0.98
+    # learning_rate_decay_steps = 5
+    learning_rate_decay_rate = 0.1
+    learning_rate_decay_patience = 2
+    
 
     ex.observers.append(FileStorageObserver.create(logdir))
     pass
@@ -142,11 +143,12 @@ def make_model(
     device,
     custom_model_path,
     learning_rate,
-    learning_rate_decay_steps,
+    # learning_rate_decay_steps,
     learning_rate_decay_rate,
+    learning_rate_decay_patience,
     focal_gamma,
     focal_alpha,
-) -> Tuple[SamTrain, Optimizer, StepLR, int]:
+) -> Tuple[SamTrain, Optimizer, ReduceLROnPlateau, int]:
     def load_model(
         checkpoint="./sam_vit_b_01ec64.pth",
         checkpoint_type="vit_b",
@@ -171,8 +173,15 @@ def make_model(
     summary(model.prompt_encoder)
     summary(model.mask_decoder)
 
-    scheduler = StepLR(
-        optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate
+    # scheduler = StepLR(
+    #     optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate
+    # )
+    scheduler = ReduceLROnPlateau(
+        optimizer=optimizer,
+        mode='max',
+        factor=learning_rate_decay_rate,
+        patience=learning_rate_decay_patience,
+        verbose=True,
     )
 
     sam_train = SamTrain(sam_model=model)
@@ -232,7 +241,7 @@ def train(
     assert isinstance(sam_train, SamTrain), ""
     assert isinstance(train_dataset, FLARE22_MaskAug), ""
     assert isinstance(optimizer, Optimizer), ""
-    assert isinstance(scheduler, StepLR), ""
+    assert isinstance(scheduler, ReduceLROnPlateau), ""
     assert isinstance(loss_fnc, MultimaskSamLoss), ""
 
     optimizer.zero_grad()
@@ -289,14 +298,14 @@ def train(
         writer.add_scalar(
             "train/loss", np.array(one_batch_losses).mean(), global_step=batch_idx
         )
+        
         writer.add_scalar(
-            "train/learning_rate", scheduler.get_last_lr()[0], global_step=batch_idx
+            "train/learning_rate", optimizer.param_groups[0]['lr'], global_step=batch_idx
         )
 
         # End 1 epoch
         # LR-scheduler run by epoch
-        scheduler.step()
-        pass
+        # scheduler.step()
 
         # The idx from the above loop will be leak out of scope, this is python feat.
         if idx % gradient_accumulation_step != 0:
@@ -310,6 +319,9 @@ def train(
             metrics: dict = run_evaluate(sam_train=sam_train)
             for k, v in metrics.items():
                 writer.add_scalar(f"validation/{k}", v, global_step=batch_idx)
+                pass
+            scheduler.step(metrics['dice/mean_of_best'])
+
             pass
 
         if batch_idx % save_epoch == 0:
