@@ -1,12 +1,13 @@
 # This config get from IVOS project of anh Thang Long and his friend
 # https://github.com/kaylode/ivos/tree/master/tools/preprocess/windowing_ct/config.py
-from typing import List
+from typing import List, Tuple
 import nibabel as nib
 
 import numpy as np
 
 from scripts.datasets.constant import FLARE22_LABEL_ENUM, IMAGE_TYPE
 from scripts.tools.evaluation.loading import change_axes_of_image, load_ct_info
+
 # from scripts.datasets.transform import TRANSFORM
 
 
@@ -31,7 +32,9 @@ class FLARE22_Preprocess:
     def __init__(self) -> None:
         pass
 
-    def run_with_config(self, image_file: str, gt_file: str, config_name: IMAGE_TYPE):
+    def run_with_config(
+        self, image_file: str, gt_file: str, config_name: IMAGE_TYPE
+    ) -> Tuple[np.ndarray, np.ndarray]:
         assert config_name in IMAGE_TYPE
         assert ".nii.gz" in image_file
         assert ".nii.gz" in gt_file
