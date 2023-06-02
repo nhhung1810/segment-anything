@@ -10,12 +10,14 @@ from typing import Dict, List, Tuple
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.datasets.constant import (
     BASE_PRETRAIN_PATH,
+    DATASET_ROOT,
     DEFAULT_DEVICE,
     FIX_VALIDATION_SPLIT,
     IMAGE_TYPE,
     TRAIN_NON_PROCESSED,
 )
 from scripts.sam_train import SamTrain
+from scripts.utils import make_directory
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
 
@@ -113,18 +115,20 @@ class F22_MaskPropagate(Dataset):
         selected_class: List[int] = list(range(1, 14)),
         direction: Tuple[int, int] = [1, 1],
         n_frame: int = 2,
+        device: str = DEFAULT_DEVICE,
     ) -> None:
         self.volume_loader = FLARE22_Preprocess()
         self.direction = direction
         self.n_frame = n_frame
-        self.selected_class = (selected_class,)
-
+        self.selected_class = selected_class
+        self.device = device
+        self.is_training = is_training
         if not is_training:
-            self.cache_path = self.VAL_CACHE_NAME
+            self.cache_path = os.path.join(DATASET_ROOT, self.VAL_CACHE_NAME)
             self.paths = get_train_test_split("validation")
             pass
         else:
-            self.cache_path = self.TRAIN_CACHE_NAME
+            self.cache_path = os.path.join(DATASET_ROOT, self.TRAIN_CACHE_NAME)
             self.paths = get_train_test_split("train")
 
         if pretrain_model:
@@ -132,10 +136,11 @@ class F22_MaskPropagate(Dataset):
             self.pretrain_model.eval()
             self.train_sam = SamTrain(self.pretrain_model)
 
+        self.original_size = None
         self.input_size = None
-        self.output_size = None
         self.dataset = []
         self.cache_size_path = os.path.join(self.cache_path, "size-data.pt")
+        make_directory(self.cache_size_path, is_file=True)
         assert_paths(paths)
 
         pass
@@ -150,10 +155,9 @@ class F22_MaskPropagate(Dataset):
         return data
 
     def format_batch(self, data: Dict[str, torch.Tensor]):
-        # Remove the batch dimension
-        img_emb = data["img_emb"][0]
+        img_emb = data["img_emb"]
         mask = data["mask"]
-        previous_mask = (data["previous_mask"],)
+        previous_mask = data["previous_mask"]
         class_number = data["class_number"]
         return dict(
             img_emb=img_emb.to(self.device),
@@ -164,6 +168,9 @@ class F22_MaskPropagate(Dataset):
 
     def __len__(self):
         return len(self.dataset)
+
+    def get_size(self):
+        return (self.input_size[0], self.input_size[1]), (self.original_size[0], self.original_size[1])
 
     def preprocess(self):
         for image_path, label_path in tqdm(
@@ -198,7 +205,7 @@ class F22_MaskPropagate(Dataset):
                 )
                 # Ensure the size data to be consistent
                 self.original_size = assert_equal(self.original_size, original_size)
-                self.input_size = assert_equal(self.original_size, input_size)
+                self.input_size = assert_equal(self.input_size, input_size)
                 all_emb.append(img_emb)
                 pass
             all_emb = torch.cat(all_emb, dim=0)
@@ -206,28 +213,29 @@ class F22_MaskPropagate(Dataset):
             cache_data = {
                 # "images": images,
                 "img_emb": torch.as_tensor(all_emb),
-                "masks": torch.as_tensor(masks),
+                "masks": torch.as_tensor(masks.astype(np.uint8)),
             }
             torch.save(cache_data, cache_path)
 
             pass
 
         # Save the caching
-        if self.original_size is not None or self.input_size is not None:
+        if self.original_size is not None and self.input_size is not None:
             torch.save(
                 dict(original_size=original_size, input_size=input_size),
                 self.cache_size_path,
             )
-        else:
+        
+
+    def preload(self):
+        if self.original_size is None or self.input_size is None:
             # If all computing skipped -> load from cache...
             cache_data = torch.load(self.cache_size_path)
             self.original_size = cache_data["original_size"]
             self.input_size = cache_data["input_size"]
             pass
-
-    def preload(self):
         # Need to packing up data with the previous frame
-        for _, label_path in tqdm(self.paths, desc="Preprocessing volume..."):
+        for _, label_path in tqdm(self.paths, desc="Preloading, per-patient..."):
             cache_path = os.path.join(
                 self.cache_path, f"{get_patient_name(label_path)}.pt"
             )
@@ -236,7 +244,7 @@ class F22_MaskPropagate(Dataset):
             masks = cache_data["masks"]
             starts, ends = get_all_organ_range(masks)
             # Iterate over each class
-            for class_num in range(self.selected_class):
+            for class_num in self.selected_class:
                 start, end = starts[class_num], ends[class_num]
                 # Trim down to head and tail
                 organ_embed = embeddings[start : end + 1]
@@ -277,8 +285,8 @@ class F22_MaskPropagate(Dataset):
             buffer_length, desc="Pairing...", total=buffer_length, leave=False
         ):
             for previous_frame_idx in range(
-                start=max(0, idx - n_step_backward),
-                stop=min(buffer_length, idx + n_step_forward + 1),
+                max(0, idx - n_step_backward),
+                min(buffer_length, idx + n_step_forward + 1),
             ):
                 if previous_frame_idx == idx:
                     continue
@@ -300,13 +308,19 @@ if __name__ == "__main__":
     sam: Sam = sam_model_registry["vit_b"](checkpoint=BASE_PRETRAIN_PATH)
     sam.to(DEFAULT_DEVICE)
     dataset = F22_MaskPropagate(
-        is_training=False,
+        is_training=True,
         pretrain_model=sam,
+        direction=[1, 1],
+        n_frame=3,
     )
+    dataset.preprocess()
+    dataset.preload()
+    print(f"Dataset loaded, in training? {dataset.is_training}, size: {len(dataset)}")
     loader = DataLoader(dataset, batch_size=2, shuffle=True, drop_last=True)
-    for idx, batch in enum(loader):
+    for idx, batch in enumerate(loader):
         if idx > 5:
             break
-        print(batch)
+        for k, v in batch.items():
+            print(k, v.shape)
         pass
     pass
