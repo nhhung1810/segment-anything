@@ -62,7 +62,7 @@ def config():
     batch_size = 16
 
     logdir = f"runs/{NAME}-{TIME}"
-    custom_model_path = None
+    custom_model_path = "runs/imp-230601-213326/model-30.pt"
     class_selected = None
     # class_selected = None
 
@@ -76,9 +76,9 @@ def config():
     focal_alpha = None
 
     # Optim params
-    learning_rate = 6e-4
-    learning_rate_decay_rate = 0.5
-    learning_rate_decay_patience = 4
+    learning_rate = 6e-5
+    learning_rate_decay_rate = 0.1
+    learning_rate_decay_patience = 2
     
 
     ex.observers.append(FileStorageObserver.create(logdir))

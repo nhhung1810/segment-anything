@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm, trange
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.datasets.constant import (
@@ -17,9 +17,10 @@ from scripts.datasets.constant import (
     TRAIN_NON_PROCESSED,
 )
 from scripts.sam_train import SamTrain
-from scripts.utils import make_directory
+from scripts.utils import make_directory, omit
 from segment_anything.modeling.sam import Sam
 from segment_anything.build_sam import sam_model_registry
+import albumentations as A
 
 
 def find_organ_range(masks: np.ndarray, class_num: int) -> Tuple[int, int]:
@@ -101,6 +102,102 @@ def get_train_test_split(group):
     return list(zip(image_paths, label_paths))
 
 
+class Augmentation:
+    def __init__(self, aug_config: Dict[int, object]) -> None:
+        self.selected_class = []
+        self.aug_fn_map = {}
+        if aug_config is not None:
+            self.selected_class: List[int] = list(aug_config.keys())
+            # Prebuilt augmentation mapping
+            self.aug_fn_map = {
+                class_num : self.build_augmentation(config=aug_config[class_num]) 
+                for class_num 
+                in self.selected_class
+            }
+        
+        pass
+
+    def apply(self, previous_mask, class_number):
+        # This function should not throw error and cancel the training
+        try:
+            if class_number not in self.selected_class:
+                return previous_mask
+            
+            return self.aug_fn_map[class_number](previous_mask)
+        except Exception as msg:
+            print(msg)
+            return previous_mask
+        
+
+    def build_augmentation(self, config: dict) -> Callable[[torch.Tensor], torch.Tensor]:
+        key = config['key']
+        aug_params = omit(config, ['key'])
+        if key == 'one-block-drop':
+            fn = lambda previous_mask: self.one_block_drop(previous_mask, **aug_params)
+            return fn
+        elif key == 'pixel-drop':
+            fn = lambda previous_mask: self.pixel_drop(previous_mask, **aug_params)
+            return fn
+        
+        return lambda x: x
+
+    def calculate_bbox(self, coors: torch.Tensor):
+        xs = coors[:, 1]
+        ys = coors[:, 0]
+        top_left = [xs.min(), ys.min()]
+        right_bottom = [xs.max(), ys.max()]
+        w, h = [right_bottom[0] - top_left[0], right_bottom[1] - top_left[1]]
+        return top_left, right_bottom, w, h
+    
+    def one_block_drop(
+        self, previous_mask: torch.Tensor, max_crop_ratio: float, augmentation_prop: float
+    ):
+        coors = torch.argwhere(previous_mask)
+        if coors.shape[0] == 0:
+            return previous_mask
+        top_left, right_bottom, w, h = self.calculate_bbox(coors)
+        max_crop = int(min(w, h) * max_crop_ratio)
+        if max_crop == 0:
+            return previous_mask
+
+        drop_fn = A.CoarseDropout(
+            max_holes=1,
+            max_height=int(max_crop),
+            max_width=int(max_crop),
+            fill_value=0.0,
+            p=augmentation_prop,
+        )
+        # Sub-region augmentation only
+        y_slice = slice(top_left[1], right_bottom[1])
+        x_slice = slice(top_left[0], right_bottom[0])
+        sub_mask = previous_mask[y_slice, x_slice]
+        sub_mask = drop_fn(image=sub_mask.cpu().numpy())["image"]
+        previous_mask[y_slice, x_slice] = torch.as_tensor(sub_mask)
+        return previous_mask
+    
+    def pixel_drop(self, previous_mask: torch.Tensor, drop_out_prop: float, augmentation_prop: float):
+        coors = torch.argwhere(previous_mask)
+        if coors.shape[0] == 0:
+            return previous_mask
+        top_left, right_bottom, w, h = self.calculate_bbox(coors)
+        # Just a safety number, as I think that 4 pixels
+        # is not enough for augmentation
+        if min(w, h) < 3:
+            return previous_mask
+        drop_fn = A.PixelDropout(
+            dropout_prob=drop_out_prop, 
+            drop_value=0, 
+            p=augmentation_prop
+        )
+        # Sub-region augmentation only
+        y_slice = slice(top_left[1], right_bottom[1])
+        x_slice = slice(top_left[0], right_bottom[0])
+        sub_mask = previous_mask[y_slice, x_slice]
+        sub_mask = drop_fn(image=sub_mask.cpu().numpy())["image"]
+        previous_mask[y_slice, x_slice] = torch.as_tensor(sub_mask)
+        return previous_mask
+
+
 class F22_MaskPropagate(Dataset):
     LIMIT = 20
     TRAIN_CACHE_NAME = "f22-mp-improve/train"
@@ -116,6 +213,7 @@ class F22_MaskPropagate(Dataset):
         direction: Tuple[int, int] = [1, 1],
         n_frame: int = 2,
         device: str = DEFAULT_DEVICE,
+        aug_config: Dict[int, object] = None
     ) -> None:
         self.volume_loader = FLARE22_Preprocess()
         self.direction = direction
@@ -123,6 +221,7 @@ class F22_MaskPropagate(Dataset):
         self.selected_class = selected_class
         self.device = device
         self.is_training = is_training
+        
         if not is_training:
             self.cache_path = os.path.join(DATASET_ROOT, self.VAL_CACHE_NAME)
             self.paths = get_train_test_split("validation")
@@ -143,22 +242,35 @@ class F22_MaskPropagate(Dataset):
         make_directory(self.cache_size_path, is_file=True)
         assert_paths(paths)
 
+        # Augmentation engine
+        self.augmentation_engine = Augmentation(aug_config=aug_config)
+
         pass
 
     def __getitem__(self, index):
         data = self.dataset[index]
-        data = self.augment(data)
-        data = self.format_batch(data)
-        return data
+        # Buffer data should not be modified
+        result = self.augment(data)
+        result = self.format_batch(result)
+        return result
 
     def augment(self, data):
-        return data
+        class_number : int = data['int_class_number']
+        previous_mask : torch.Tensor = data['previous_mask']
+        previous_mask = self.augmentation_engine.apply(
+            previous_mask=previous_mask, 
+            class_number=class_number
+            )
+        result = omit(data, ['previous_mask'])
+        result['previous_mask'] = previous_mask
+        return result
 
     def format_batch(self, data: Dict[str, torch.Tensor]):
         img_emb = data["img_emb"]
         mask = data["mask"]
         previous_mask = data["previous_mask"]
         class_number = data["class_number"]
+        
         return dict(
             img_emb=img_emb.to(self.device),
             mask=mask.to(self.device),
@@ -297,6 +409,7 @@ class F22_MaskPropagate(Dataset):
                         "mask": current_buffer[idx][1],
                         "previous_mask": current_buffer[previous_frame_idx][1],
                         "class_number": torch.LongTensor([class_num]),
+                        "int_class_number": class_num,
                     }
                 )
                 pass
