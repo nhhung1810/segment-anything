@@ -168,11 +168,13 @@ class Augmentation:
             p=augmentation_prop,
         )
         # Sub-region augmentation only
+        previous_mask = previous_mask.clone()
         y_slice = slice(top_left[1], right_bottom[1])
         x_slice = slice(top_left[0], right_bottom[0])
         sub_mask = previous_mask[y_slice, x_slice]
         sub_mask = drop_fn(image=sub_mask.cpu().numpy())["image"]
         previous_mask[y_slice, x_slice] = torch.as_tensor(sub_mask)
+
         return previous_mask
     
     def pixel_drop(self, previous_mask: torch.Tensor, drop_out_prop: float, augmentation_prop: float):
@@ -190,6 +192,7 @@ class Augmentation:
             p=augmentation_prop
         )
         # Sub-region augmentation only
+        previous_mask = previous_mask.clone()
         y_slice = slice(top_left[1], right_bottom[1])
         x_slice = slice(top_left[0], right_bottom[0])
         sub_mask = previous_mask[y_slice, x_slice]

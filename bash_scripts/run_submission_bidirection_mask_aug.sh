@@ -3,7 +3,7 @@
 # Mask augmentation
 
 python bash_scripts/run_submission_bidirection_mask_aug.py \
-    --model_dir "runs/imp-230602-234856" \
+    --model_dir "runs/imp-aug-230606-002414" \
     --is_custom_class 1 \
     --prefix "e3"
 

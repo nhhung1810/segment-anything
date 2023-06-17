@@ -37,7 +37,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 IS_DEBUG = False
-NAME = "imp"
+NAME = "imp-aug"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -62,9 +62,34 @@ def config():
     batch_size = 16
 
     logdir = f"runs/{NAME}-{TIME}"
-    custom_model_path = "runs/imp-230601-213326/model-30.pt"
+    # custom_model_path = "runs/imp-230601-213326/model-30.pt"
+    custom_model_path = None
     class_selected = None
+    # class_selected = [
+    #     FLARE22_LABEL_ENUM.LIVER.value,
+    #     FLARE22_LABEL_ENUM.GALLBLADDER.value,
+    #     FLARE22_LABEL_ENUM.IVC.value,
+    #     FLARE22_LABEL_ENUM.RIGHT_KIDNEY.value,
+    # ]
+    train_n_previous_frame = 2
     # class_selected = None
+    aug_dict = {
+        FLARE22_LABEL_ENUM.LIVER.value: {
+            "key": "one-block-drop",
+            "max_crop_ratio": 0.5,
+            "augmentation_prop": 0.5,
+        },
+        # FLARE22_LABEL_ENUM.GALLBLADDER.value: {
+        #     "key": "pixel-drop",
+        #     "drop_out_prop": 0.2,
+        #     "augmentation_prop": 0.5,
+        # },
+        # FLARE22_LABEL_ENUM.IVC.value: {
+        #     "key": "pixel-drop",
+        #     "drop_out_prop": 0.2,
+        #     "augmentation_prop": 0.5,
+        # },
+    }
 
     n_epochs = 100
     save_epoch = 5
@@ -76,7 +101,7 @@ def config():
     focal_alpha = None
 
     # Optim params
-    learning_rate = 6e-5
+    learning_rate = 6e-4
     learning_rate_decay_rate = 0.1
     learning_rate_decay_patience = 2
     
@@ -87,14 +112,16 @@ def config():
 
 @ex.capture
 def make_dataset(
-    device, batch_size, class_selected
+    device, batch_size, class_selected, train_n_previous_frame, aug_dict
 ) -> Tuple[F22_MaskPropagate, DataLoader]:
     # Save GPU by host the dataset on cpu only
     class_selected = class_selected or list(range(1, 14))
     dataset = F22_MaskPropagate(
         is_training=True,
         device=device,  
-        selected_class=class_selected
+        selected_class=class_selected,
+        n_frame=train_n_previous_frame,
+        aug_config=aug_dict
     )
     dataset.preprocess()
     dataset.preload()
@@ -264,16 +291,6 @@ def train(
 
             pass
 
-        # Loss by batch
-        writer.add_scalar(
-            "train/loss", np.array(one_batch_losses).mean(), global_step=batch_idx
-        )
-        
-        writer.add_scalar(
-            "train/learning_rate", optimizer.param_groups[0]['lr'], global_step=batch_idx
-        )
-
-
         # The idx from the above loop will be leak out of scope, this is python feat.
         if idx % gradient_accumulation_step != 0:
             # Run backward if there some gradient left
@@ -291,7 +308,20 @@ def train(
 
             pass
 
+
+
         if batch_idx % save_epoch == 0:
             model_path = os.path.join(logdir, f"model-{batch_idx}.pt")
             checkpoint(sam_train.model, device, model_path)
             pass
+
+        writer.add_scalar(
+            "train/loss", np.array(one_batch_losses).mean(), global_step=batch_idx
+        )
+        lr = optimizer.param_groups[0]['lr']
+        writer.add_scalar(
+            "train/learning_rate", lr, global_step=batch_idx
+        )
+
+        if lr <= 1e-7:
+            break
