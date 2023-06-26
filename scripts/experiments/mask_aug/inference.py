@@ -1,5 +1,6 @@
 from glob import glob
 import os
+import sys
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 from torch import Tensor
@@ -20,6 +21,7 @@ from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 
 from scripts.tools.evaluation.loading import post_process
+from scripts.tools.profiling import GPUProfiler
 from scripts.utils import make_directory, pick
 from segment_anything.build_sam import sam_model_registry
 from segment_anything.modeling import sam
@@ -233,6 +235,7 @@ def class_inference(
         original_size=original_size, mask_input=previous_mask[None, ...]
     )
 
+    # atc.__enter__()
     mask_pred, _, _ = sam_train.predict_torch(
         image_emb=img_emb,  # 1, 256, 64, 64
         input_size=input_size,
@@ -242,6 +245,9 @@ def class_inference(
         return_logits=False,
         mask_input=mask_input_torch,
     )
+    # Prevent error. This won't do anything
+    # atc.__exit__(1, 1, 1)
+    # torch.cuda.synchronize()
 
     # Dice loss -> take the smallest (the smaller the better)
     chosen_idx, _ = pick_best_mask(
@@ -271,9 +277,11 @@ def inference(
     inference_save_dir: str,
     selected_class: List[int],
     device: str,
+    use_cache: bool,
 ):
     assert len(images) == len(gts)
     preprocessor = FLARE22_Preprocess()
+    total_times = []
     for image_file, gt_file in tqdm(
         zip(images, gts), total=len(images), desc="Inference for patient..."
     ):
@@ -286,51 +294,67 @@ def inference(
         )
 
         starts, ends = get_all_organ_range(masks)
-        cache_volume = torch_try_load(cache_volume_path, device=device)
+        if use_cache:
+            cache_volume = torch_try_load(cache_volume_path, device=device)
+        else:
+            cache_volume = {}
         predict_volume = []
         previous_mask = None
         is_init_dict: Dict[int, bool] = {}
-        for idx in tqdm(
-            range(volumes.shape[0]),
-            desc="Inference frame by frame...",
-            leave=False,
-            total=volumes.shape[0],
-        ):
-            # Grey-scale 3 channels
-            img = volumes[idx][..., None].repeat(3, -1)
-            mask = masks[idx, ...]
-            cache_frame = cache_volume.get(idx, None)
-            merged_prediction, cache_frame = frame_inference(
-                sam_train=sam_train,
-                selected_class=selected_class,
-                class_appearance_range=(starts, ends),
-                frame_idx=idx,
-                img=img,
-                mask=mask,
-                previous_merged_mask=previous_mask,
-                device=device,
-                cache_frame=cache_frame,
-                is_init_dict=is_init_dict,
-            )
-
-            previous_mask = merged_prediction
-            save_pred = merged_prediction.detach().cpu().numpy().astype(np.uint8)
-            predict_volume.append(save_pred)
-            cache_volume[idx] = cache_frame
-            pass
+        # device_idx = int(device.replace("cuda:", ""))
+        # torch.cuda.synchronize()
+        # with GPUProfiler(gpu_index=device_idx, gpu_memory_txt_path="gpu_tmp.txt") as prof:
+        with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=True):
+            for idx in tqdm(
+                range(volumes.shape[0]),
+                desc="Inference frame by frame...",
+                leave=False,
+                total=volumes.shape[0],
+            ):
+                # Grey-scale 3 channels
+                img = volumes[idx][..., None].repeat(3, -1)
+                mask = masks[idx, ...]
+                cache_frame = cache_volume.get(idx, None)
+                merged_prediction, cache_frame = frame_inference(
+                    sam_train=sam_train,
+                    selected_class=selected_class,
+                    class_appearance_range=(starts, ends),
+                    frame_idx=idx,
+                    img=img,
+                    mask=mask,
+                    previous_merged_mask=previous_mask,
+                    device=device,
+                    cache_frame=cache_frame,
+                    is_init_dict=is_init_dict,
+                )
+                # prof.inspect()
+                previous_mask = merged_prediction
+                save_pred = merged_prediction.detach().cpu().numpy().astype(np.uint8)
+                predict_volume.append(save_pred)
+                cache_volume[idx] = cache_frame
+                # print(f"This line is skipped?: {total_times}", flush=True)
+                # print(f"How about this fck: {prof.get_time()}?", file=sys.stdout, flush=True)
+                pass
         # Pack all prediction into volume
         predict_volume = np.stack(predict_volume, axis=0)
-        # new shape=[H, W, T]
+        # # new shape=[H, W, T]
         predict_volume = predict_volume.transpose(1, 2, 0).astype(np.uint8)
-
+        # print(prof.get_time(), flush=True)
         # Convert file into nii.gz format for inference
         post_process(
             pred=predict_volume,
             gt_file=gt_file,
             out_dir=inference_save_dir,
         )
-        torch.save(cache_volume, cache_volume_path)
+        # torch.save(cache_volume, cache_volume_path)
+        # torch.cuda.synchronize()
+        # total_times.append(prof.get_time())
+        # print(f"This about this fck?: {prof.get_time()}", file=sys.stdout, flush=True)
+        # print("How about this line?", file=sys.stdout, flush=True)
+        # print("How about this line?", file=sys.stderr, flush=True)
+        # print(f"This line is skipped?: {total_times}", flush=True)
         pass
+    return total_times
 
 
 parser = ArgumentParser()
@@ -368,7 +392,7 @@ parser.add_argument(
     "--use_cache",
     type=str,
     help="Allow the model to use embedding cache for faster inference",
-    default=True,
+    default=False,
 )
 
 parser.add_argument(
@@ -429,14 +453,21 @@ if __name__ == "__main__":
     for i, p in zip(images_path, labels_path):
         assert os.path.exists(i), f"{i}"
         assert os.path.exists(p), f"{p}"
-
-    inference(
+        pass
+    
+    total_times = inference(
         images=images_path,
         gts=labels_path,
         inference_save_dir=inference_save_dir,
         sam_train=sam_train,
         selected_class=selected_class,
         device=device,
+        use_cache=use_cache
     )
+    if len(total_times) > 0:
+        print(f"Mean of elapsed time: {np.mean(total_times):.2f}us")
+    else:
+        print("Error getting the total time")
+
 
     pass

@@ -55,6 +55,7 @@ def scan(input_dir, depth=1, exludes=[]):
         if experiment_main_name in exludes:
             continue
         df_dict = {
+            "path": experiment_folder,
             "name": experiment_main_name,
             "n_checkpoint": num_checkpoint,
             **pick(run_metadata, ["start_time", "stop_time", "status"]),

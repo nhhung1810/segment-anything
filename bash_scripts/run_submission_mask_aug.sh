@@ -6,6 +6,8 @@ for t in ${candidates[@]}; do
     echo "runs/$t"
     python bash_scripts/run_submission_mask_aug.py \
         --model_dir "runs/$t" \
-        --prefix "thesis"
-        # --is_custom_class 1 \
+        --prefix "perf" \
+        --is_custom_class 1 \
+        --limit 1
+        # --skip_eval 1
 done
