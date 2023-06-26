@@ -57,7 +57,7 @@ if __name__ == "__main__":
             model = model[:-limit]
 
     # Skip some small step
-    model = [p for p in model if int(os.path.basename(p).replace(".pt", "").split("-")[1]) % 10 == 0]
+    # model = [p for p in model if int(os.path.basename(p).replace(".pt", "").split("-")[1]) % 10 == 0]
 
     for model_path in tqdm(model, total=len(model), desc="Invoke the evaluation script..."):
         model_name = os.path.basename(os.path.dirname(model_path))

@@ -20,6 +20,13 @@ parser.add_argument(
     default="runs",
 )
 parser.add_argument(
+    "-d",
+    "--depth",
+    type=int,
+    help="Depth of scanning",
+    default=2,
+)
+parser.add_argument(
     "-o", "--output", type=str, help="Output csv file", default=f"config-{TIME}.csv"
 )
 
@@ -30,13 +37,10 @@ def load_json(path):
 
     return d
 
-
-if __name__ == "__main__":
-    args = parser.parse_args()
-    input_dir = args.input_dir
-    output_file = args.output
-    # os.listdir()
-    sacred_paths = list(glob(f"{input_dir}/*/_sources/", recursive=True))
+def scan(input_dir, depth=1, exludes=[]):
+    scan_depth = "*/" * depth
+    glob_string = f"{input_dir}/{scan_depth}/_sources/"
+    sacred_paths = list(glob(glob_string, recursive=True))
     sacred_paths = [p.replace("_sources/", "") for p in sacred_paths]
     all_dfs = []
     for experiment_folder in sacred_paths:
@@ -48,8 +52,10 @@ if __name__ == "__main__":
         config_data = load_json(config_path)
         run_metadata = load_json(runs_path)
         experiment_main_name = run_metadata["experiment"]["name"]
-
+        if experiment_main_name in exludes:
+            continue
         df_dict = {
+            "path": experiment_folder,
             "name": experiment_main_name,
             "n_checkpoint": num_checkpoint,
             **pick(run_metadata, ["start_time", "stop_time", "status"]),
@@ -57,9 +63,6 @@ if __name__ == "__main__":
                 config_data,
                 [
                     "batch_size",
-                    "device",
-                    "focal_alpha",
-                    "focal_gamma",
                     "gradient_accumulation_step",
                     "logdir",
                     "custom_model_path",
@@ -70,12 +73,29 @@ if __name__ == "__main__":
                     "learning_rate",
                     "learning_rate_decay_steps",
                     "learning_rate_decay_rate",
+                    "learning_rate_decay_patience",
+                    "aug_dict",
                 ],
             ),
         }
 
         temp_df = pd.DataFrame([list(df_dict.values())], columns=list(df_dict.keys()))
         all_dfs.append(temp_df)
-        pass
+    return all_dfs
+
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+    input_dir = args.input_dir
+    output_file = args.output
+    depth = args.depth
+    exludes = [
+        'sam-fix-iou',
+        'sam-one-point',
+        'organ-ctx'
+    ]
+    all_dfs = []
+    for d in range(1, depth + 1, 1):
+        all_dfs.extend(scan(input_dir, depth=d, exludes=exludes))
     pd.concat(all_dfs).to_csv(output_file, index=False)
     pass

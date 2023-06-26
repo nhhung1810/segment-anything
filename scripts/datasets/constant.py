@@ -38,3 +38,7 @@ TRAIN_PATH = "./dataset/FLARE22-version1/TrainImageProcessed"
 TRAIN_MASK = "./dataset/FLARE22-version1/TrainMask"
 TRAIN_METADATA = "./dataset/FLARE22-version1/train_metadata.json"
 VAL_METADATA = "./dataset/FLARE22-version1/val_metadata.json"
+FIX_VALIDATION_SPLIT = ["0008", "0010", "0011", "0032", "0046"]
+
+# Checkpoint
+BASE_PRETRAIN_PATH = "./sam_vit_b_01ec64.pth"
