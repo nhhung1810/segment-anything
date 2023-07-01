@@ -37,7 +37,7 @@ from tqdm import tqdm
 from typing import Tuple
 
 IS_DEBUG = False
-NAME = "imp-aug"
+NAME = "exps"
 TIME = datetime.now().strftime("%y%m%d-%H%M%S")
 ex = Experiment(NAME)
 
@@ -75,20 +75,16 @@ def config():
     # class_selected = None
     aug_dict = {
         FLARE22_LABEL_ENUM.LIVER.value: {
-            "key": "one-block-drop",
-            "max_crop_ratio": 0.5,
+            "key": "pick-square",
             "augmentation_prop": 0.5,
+            "gaussian_config": {
+                "sigma": 5,
+                "kernel_length": 5,
+                "prob": 0.8,
+            },
+            "center_radius": 3,
+            "radius_width": 5,
         },
-        # FLARE22_LABEL_ENUM.GALLBLADDER.value: {
-        #     "key": "pixel-drop",
-        #     "drop_out_prop": 0.2,
-        #     "augmentation_prop": 0.5,
-        # },
-        # FLARE22_LABEL_ENUM.IVC.value: {
-        #     "key": "pixel-drop",
-        #     "drop_out_prop": 0.2,
-        #     "augmentation_prop": 0.5,
-        # },
     }
 
     n_epochs = 100
@@ -104,7 +100,6 @@ def config():
     learning_rate = 6e-4
     learning_rate_decay_rate = 0.1
     learning_rate_decay_patience = 2
-    
 
     ex.observers.append(FileStorageObserver.create(logdir))
     pass
@@ -118,10 +113,10 @@ def make_dataset(
     class_selected = class_selected or list(range(1, 14))
     dataset = F22_MaskPropagate(
         is_training=True,
-        device=device,  
+        device=device,
         selected_class=class_selected,
         n_frame=train_n_previous_frame,
-        aug_config=aug_dict
+        aug_config=aug_dict,
     )
     dataset.preprocess()
     dataset.preload()
@@ -130,9 +125,7 @@ def make_dataset(
 
     # Make sure that the evaluation dataset also work
     F22_MaskPropagate(
-        is_training=False,
-        device="cpu",
-        selected_class=class_selected
+        is_training=False, device="cpu", selected_class=class_selected
     ).preprocess()
     return dataset, loader
 
@@ -174,7 +167,7 @@ def make_model(
 
     scheduler = ReduceLROnPlateau(
         optimizer=optimizer,
-        mode='max',
+        mode="max",
         factor=learning_rate_decay_rate,
         patience=learning_rate_decay_patience,
         verbose=True,
@@ -304,11 +297,9 @@ def train(
             for k, v in metrics.items():
                 writer.add_scalar(f"validation/{k}", v, global_step=batch_idx)
                 pass
-            scheduler.step(metrics['dice/mean_of_best'])
+            scheduler.step(metrics["dice/mean_of_best"])
 
             pass
-
-
 
         if batch_idx % save_epoch == 0:
             model_path = os.path.join(logdir, f"model-{batch_idx}.pt")
@@ -318,10 +309,8 @@ def train(
         writer.add_scalar(
             "train/loss", np.array(one_batch_losses).mean(), global_step=batch_idx
         )
-        lr = optimizer.param_groups[0]['lr']
-        writer.add_scalar(
-            "train/learning_rate", lr, global_step=batch_idx
-        )
+        lr = optimizer.param_groups[0]["lr"]
+        writer.add_scalar("train/learning_rate", lr, global_step=batch_idx)
 
         if lr <= 1e-7:
             break

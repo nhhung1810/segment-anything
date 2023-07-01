@@ -21,6 +21,8 @@ from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 
 from scripts.tools.evaluation.loading import post_process
+
+# from scripts.tools.profiling import GPUProfiler
 from scripts.utils import make_directory, pick
 from segment_anything.build_sam import sam_model_registry
 from segment_anything.modeling import sam

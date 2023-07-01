@@ -1,6 +1,7 @@
 import enum
 from glob import glob
 import os
+from time import time_ns
 import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
@@ -102,19 +103,38 @@ def get_train_test_split(group):
     return list(zip(image_paths, label_paths))
 
 
+def create_gaussian_2d_kernel(length: int, sigma: float, device: str):
+    """\
+    creates gaussian kernel with side length `l` and a sigma of `sig`
+    """
+    ax = torch.linspace(-(length - 1) / 2.0, (length - 1) / 2.0, length, device=device)
+    gauss = torch.exp(
+        -0.5 * torch.square(ax) / torch.square(torch.as_tensor(sigma, device=device))
+    )
+    kernel = torch.outer(gauss, gauss)
+    return kernel / torch.sum(kernel)
+
+
+def gaussian_filter(input: torch.Tensor, kernel_length: int, sigma: float):
+    kernel = create_gaussian_2d_kernel(kernel_length, sigma, input.device)
+    result = torch.nn.functional.conv2d(input, kernel, padding="same")
+    return result
+
+
 class Augmentation:
-    def __init__(self, aug_config: Dict[int, object]) -> None:
+    def __init__(self, aug_config: Dict[int, object], seed=None) -> None:
         self.selected_class = []
         self.aug_fn_map = {}
+        self.seed = seed or (time_ns() % (2**32 - 1))
+        self.random_state = np.random.RandomState(seed=self.seed)
         if aug_config is not None:
             self.selected_class: List[int] = list(aug_config.keys())
             # Prebuilt augmentation mapping
             self.aug_fn_map = {
-                class_num : self.build_augmentation(config=aug_config[class_num]) 
-                for class_num 
-                in self.selected_class
+                class_num: self.build_augmentation(config=aug_config[class_num])
+                for class_num in self.selected_class
             }
-        
+
         pass
 
     def apply(self, previous_mask, class_number):
@@ -122,23 +142,26 @@ class Augmentation:
         try:
             if class_number not in self.selected_class:
                 return previous_mask
-            
+
             return self.aug_fn_map[class_number](previous_mask)
         except Exception as msg:
             print(msg)
             return previous_mask
-        
 
-    def build_augmentation(self, config: dict) -> Callable[[torch.Tensor], torch.Tensor]:
-        key = config['key']
-        aug_params = omit(config, ['key'])
-        if key == 'one-block-drop':
+    def build_augmentation(
+        self, config: dict
+    ) -> Callable[[torch.Tensor], torch.Tensor]:
+        key = config["key"]
+        aug_params = omit(config, ["key"])
+        if key == "one-block-drop":
             fn = lambda previous_mask: self.one_block_drop(previous_mask, **aug_params)
             return fn
-        elif key == 'pixel-drop':
+        elif key == "pixel-drop":
             fn = lambda previous_mask: self.pixel_drop(previous_mask, **aug_params)
             return fn
-        
+        elif key == "pick-square":
+            fn = lambda previous_mask: self.pick_square(previous_mask, **aug_params)
+
         return lambda x: x
 
     def calculate_bbox(self, coors: torch.Tensor):
@@ -148,9 +171,55 @@ class Augmentation:
         right_bottom = [xs.max(), ys.max()]
         w, h = [right_bottom[0] - top_left[0], right_bottom[1] - top_left[1]]
         return top_left, right_bottom, w, h
-    
+
+    def pick_square(
+        self,
+        mask: torch.Tensor,
+        center_radius: int = 3,
+        radius_width: int = 5,
+        gaussian_config=None,
+        augmentation_prop: float = 0.5,
+    ):
+        # binary mask input
+        if self.random_state.uniform(0, 1) > augmentation_prop:
+            return mask
+        # Pick the pixel
+        coors = torch.argwhere(mask)
+        idx = self.random_state.randint(low=0, high=coors.shape[0])
+        x = coors[idx][0].item()
+        y = coors[idx][1].item()
+        # Generate the square by radius
+        result = torch.zeros(mask.shape)
+        radius = torch.clamp(
+            int(center_radius + self.random_state.uniform(-1, 1) * radius_width),
+            min=1,
+            max=radius + radius_width,
+        )
+        xmax = min(x + radius, mask.shape[0])
+        ymax = min(y + radius, mask.shape[1])
+        xmin = max(x - radius, 0)
+        ymin = max(y - radius, 0)
+        result[xmin:xmax, ymin:ymax] = 1.0
+        
+        if not gaussian_config: return result
+        if self.random_state.uniform(0, 1) > gaussian_config["prob"]:
+            return result
+            
+        result = gaussian_filter(
+            result,
+            sigma=gaussian_config["sigma"],
+            kernel_length=gaussian_config["kernel_length"],
+        )
+        result = (result - torch.min(result)) / (
+            torch.max(result) - torch.min(result)
+        )
+        return result
+
     def one_block_drop(
-        self, previous_mask: torch.Tensor, max_crop_ratio: float, augmentation_prop: float
+        self,
+        previous_mask: torch.Tensor,
+        max_crop_ratio: float,
+        augmentation_prop: float,
     ):
         coors = torch.argwhere(previous_mask)
         if coors.shape[0] == 0:
@@ -176,8 +245,13 @@ class Augmentation:
         previous_mask[y_slice, x_slice] = torch.as_tensor(sub_mask)
 
         return previous_mask
-    
-    def pixel_drop(self, previous_mask: torch.Tensor, drop_out_prop: float, augmentation_prop: float):
+
+    def pixel_drop(
+        self,
+        previous_mask: torch.Tensor,
+        drop_out_prop: float,
+        augmentation_prop: float,
+    ):
         coors = torch.argwhere(previous_mask)
         if coors.shape[0] == 0:
             return previous_mask
@@ -187,9 +261,7 @@ class Augmentation:
         if min(w, h) < 3:
             return previous_mask
         drop_fn = A.PixelDropout(
-            dropout_prob=drop_out_prop, 
-            drop_value=0, 
-            p=augmentation_prop
+            dropout_prob=drop_out_prop, drop_value=0, p=augmentation_prop
         )
         # Sub-region augmentation only
         previous_mask = previous_mask.clone()
@@ -216,7 +288,7 @@ class F22_MaskPropagate(Dataset):
         direction: Tuple[int, int] = [1, 1],
         n_frame: int = 2,
         device: str = DEFAULT_DEVICE,
-        aug_config: Dict[int, object] = None
+        aug_config: Dict[int, object] = None,
     ) -> None:
         self.volume_loader = FLARE22_Preprocess()
         self.direction = direction
@@ -224,7 +296,7 @@ class F22_MaskPropagate(Dataset):
         self.selected_class = selected_class
         self.device = device
         self.is_training = is_training
-        
+
         if not is_training:
             self.cache_path = os.path.join(DATASET_ROOT, self.VAL_CACHE_NAME)
             self.paths = get_train_test_split("validation")
@@ -258,14 +330,13 @@ class F22_MaskPropagate(Dataset):
         return result
 
     def augment(self, data):
-        class_number : int = data['int_class_number']
-        previous_mask : torch.Tensor = data['previous_mask']
+        class_number: int = data["int_class_number"]
+        previous_mask: torch.Tensor = data["previous_mask"]
         previous_mask = self.augmentation_engine.apply(
-            previous_mask=previous_mask, 
-            class_number=class_number
-            )
-        result = omit(data, ['previous_mask'])
-        result['previous_mask'] = previous_mask
+            previous_mask=previous_mask, class_number=class_number
+        )
+        result = omit(data, ["previous_mask"])
+        result["previous_mask"] = previous_mask
         return result
 
     def format_batch(self, data: Dict[str, torch.Tensor]):
@@ -273,7 +344,7 @@ class F22_MaskPropagate(Dataset):
         mask = data["mask"]
         previous_mask = data["previous_mask"]
         class_number = data["class_number"]
-        
+
         return dict(
             img_emb=img_emb.to(self.device),
             mask=mask.to(self.device),
@@ -285,7 +356,10 @@ class F22_MaskPropagate(Dataset):
         return len(self.dataset)
 
     def get_size(self):
-        return (self.input_size[0], self.input_size[1]), (self.original_size[0], self.original_size[1])
+        return (self.input_size[0], self.input_size[1]), (
+            self.original_size[0],
+            self.original_size[1],
+        )
 
     def preprocess(self):
         for image_path, label_path in tqdm(
@@ -340,7 +414,6 @@ class F22_MaskPropagate(Dataset):
                 dict(original_size=original_size, input_size=input_size),
                 self.cache_size_path,
             )
-        
 
     def preload(self):
         if self.original_size is None or self.input_size is None:
