@@ -1,14 +1,32 @@
+from typing import Tuple
 import numpy as np
 import base64
 from PIL import Image
 import io
 
-from scripts.experiments.mask_aug.inference import pick_best_mask
+from torch import Tensor
+import torch
+from scripts.losses.loss import DiceLoss
 from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 
 from segment_anything.build_sam import sam_model_registry
 from segment_anything.modeling.sam import Sam
+
+DICE_FN = DiceLoss(activation=None, reduction="none")
+
+
+def pick_best_mask(
+    pred_multi_mask: Tensor,
+    previous_mask: np.ndarray,
+    device: str,
+) -> Tuple[int, float]:
+    previous_mask = torch.as_tensor(previous_mask, device=device)[
+        None, None, ...
+    ].repeat_interleave(3, dim=1)
+    dice = DICE_FN.run_on_batch(input=pred_multi_mask, target=previous_mask)
+    chosen_idx = dice.argmin()
+    return chosen_idx, dice.min().detach().cpu().item()
 
 
 class InferenceService:
@@ -38,9 +56,7 @@ class InferenceService:
         chosen_idx, _ = pick_best_mask(
             pred_multi_mask=mask_pred,
             previous_mask=mask,
-            gt_binary_mask=None,
             device=self.device,
-            strategy="prev",
         )
         mask_pred = mask_pred[0, chosen_idx]
 
