@@ -21,7 +21,6 @@ from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 
 from scripts.tools.evaluation.loading import post_process
-from scripts.tools.profiling import GPUProfiler
 from scripts.utils import make_directory, pick
 from segment_anything.build_sam import sam_model_registry
 from segment_anything.modeling import sam
@@ -304,7 +303,7 @@ def inference(
         # device_idx = int(device.replace("cuda:", ""))
         # torch.cuda.synchronize()
         # with GPUProfiler(gpu_index=device_idx, gpu_memory_txt_path="gpu_tmp.txt") as prof:
-        with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=True):
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=True):
             for idx in tqdm(
                 range(volumes.shape[0]),
                 desc="Inference frame by frame...",
@@ -454,7 +453,7 @@ if __name__ == "__main__":
         assert os.path.exists(i), f"{i}"
         assert os.path.exists(p), f"{p}"
         pass
-    
+
     total_times = inference(
         images=images_path,
         gts=labels_path,
@@ -462,12 +461,11 @@ if __name__ == "__main__":
         sam_train=sam_train,
         selected_class=selected_class,
         device=device,
-        use_cache=use_cache
+        use_cache=use_cache,
     )
     if len(total_times) > 0:
         print(f"Mean of elapsed time: {np.mean(total_times):.2f}us")
     else:
         print("Error getting the total time")
-
 
     pass
