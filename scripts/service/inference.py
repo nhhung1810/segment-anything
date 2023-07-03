@@ -13,7 +13,6 @@ from scripts.sam_train import SamTrain
 from scripts.datasets.constant import DEFAULT_DEVICE
 
 from segment_anything.build_sam import sam_model_registry
-from segment_anything.modeling import image_encoder
 from segment_anything.modeling.sam import Sam
 
 DICE_FN = DiceLoss(activation=None, reduction="none")
@@ -33,12 +32,11 @@ def pick_best_mask(
 
 
 class InferenceService:
-    def __init__(self, model_path: str = None, device: str = DEFAULT_DEVICE) -> None:
-        MODULE_PATH = os.path.abspath(os.path.dirname(__file__))
-        self.base_model_path = os.path.join(MODULE_PATH, "../../sam_vit_b_01ec64.pth")
-        self.model_path = model_path or os.path.join(
-            MODULE_PATH, "../../assets/imp-230603-150046-model-20.pt"
-        )
+    def __init__(
+        self, base_model_path: str, model_path: str, device: str = DEFAULT_DEVICE
+    ) -> None:
+        self.base_model_path = base_model_path
+        self.model_path = model_path
         model: Sam = sam_model_registry["vit_b"](
             checkpoint=self.base_model_path, custom=self.model_path
         )
@@ -134,7 +132,7 @@ if __name__ == "__main__":
 
     service = InferenceService(None)
     # # s = service.encode_image(image=np.zeros((512, 512, 3)))
-    path = "/Users/hung.nh/Downloads/mockReq.txt"
+    path = "/Users/hung.nh/Downloads/mockReqMedical.txt"
     with open(path, "r") as out:
         data = json.load(out)
 
@@ -148,7 +146,7 @@ if __name__ == "__main__":
     x, y, w, h = parse_bbox_data(data)
     # mask[y : y + h, x : x + w] = 1.0
     mask_out = image.copy()
-    mask_out[y : y + h, x : x + w, :] = 0.0
+    mask_out[y : y + h, x : x + w] = 0.0
     f, axes = plt.subplots(1, 2)
     axes[0].imshow(image)
     axes[1].imshow(mask_out)
