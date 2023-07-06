@@ -200,19 +200,18 @@ class Augmentation:
         xmin = max(x - radius, 0)
         ymin = max(y - radius, 0)
         result[xmin:xmax, ymin:ymax] = 1.0
-        
-        if not gaussian_config: return result
+
+        if not gaussian_config:
+            return result
         if self.random_state.uniform(0, 1) > gaussian_config["prob"]:
             return result
-            
+
         result = gaussian_filter(
             result,
             sigma=gaussian_config["sigma"],
             kernel_length=gaussian_config["kernel_length"],
         )
-        result = (result - torch.min(result)) / (
-            torch.max(result) - torch.min(result)
-        )
+        result = (result - torch.min(result)) / (torch.max(result) - torch.min(result))
         return result
 
     def one_block_drop(
