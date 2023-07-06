@@ -1,26 +1,21 @@
 from glob import glob
 import os
-from jinja2 import pass_eval_context
-from matplotlib.widgets import EllipseSelector
 import torch
 from tqdm import tqdm
 from scripts.datasets.constant import FLARE22_LABEL_ENUM, IMAGE_TYPE
-from torch.utils.data import Dataset, DataLoader
-import pandas as pd
+from torch.utils.data import Dataset
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.utils import make_directory
 
 preprocessor = FLARE22_Preprocess()
 
-TRAIN_ROOT = "../dataset/FLARE22-version1/FLARE22_LabeledCase50"
+TRAIN_ROOT = "./dataset/FLARE22-version1/FLARE22_LabeledCase50"
 TRAIN_IMAGE_PATH = os.path.join(TRAIN_ROOT, "images/*.nii.gz")
 TRAIN_MASK_PATH = os.path.join(TRAIN_ROOT, "labels/*.nii.gz")
 
-VAL_ROOT = "../dataset/FLARE22-version1/ReleaseValGT-20cases"
+VAL_ROOT = "./dataset/FLARE22-version1/ReleaseValGT-20cases"
 VAL_IMAGE_PATH = os.path.join(VAL_ROOT, "images/*.nii.gz")
 VAL_MASK_PATH = os.path.join(VAL_ROOT, "labels/*.nii.gz")
 
@@ -34,8 +29,8 @@ val_file = list(zip(val_images, val_masks))
 
 
 class MeanShapeDataset(Dataset):
-    TRAIN_CACHE_NAME = "mean-shape/train"
-    VAL_CACHE_NAME = "mean-shape/validation"
+    TRAIN_CACHE_NAME = "dataset/FLARE22-version1/mean-shape/train"
+    VAL_CACHE_NAME = "dataset/FLARE22-version1/mean-shape/validation"
 
     def __init__(
         self,
@@ -120,4 +115,7 @@ class MeanShapeDataset(Dataset):
             pos.append(positive)
             neg.append(negative)
 
-        return positive, negative
+        pos = np.concatenate(pos, axis=0)
+        neg = np.concatenate(neg, axis=0)
+
+        return pos, neg
