@@ -191,9 +191,9 @@ class Augmentation:
         # Generate the square by radius
         result = torch.zeros(mask.shape)
         radius = torch.clamp(
-            int(center_radius + self.random_state.uniform(-1, 1) * radius_width),
-            min=1,
-            max=radius + radius_width,
+            torch.as_tensor(int(center_radius + self.random_state.uniform(-1, 1) * radius_width)),
+            min=torch.as_tensor(1),
+            max=torch.as_tensor(center_radius + radius_width),
         )
         xmax = min(x + radius, mask.shape[0])
         ymax = min(y + radius, mask.shape[1])
