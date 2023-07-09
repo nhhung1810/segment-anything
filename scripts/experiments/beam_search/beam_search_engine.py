@@ -342,16 +342,22 @@ class BeamSearchInferenceEngine:
             start_idx,
             end_idx,
             beam_width,
-            init_mask,
             proposal_start_idx,
+            init_mask,
             is_forward=True,
         )
+        proposal_masks = [
+            forward_data[0],  # This is the middle frame
+            forward_data[-1],  # This is the last frame
+        ]
+
         backward_data = self.beam_search(
             start_idx,
             end_idx,
             beam_width,
-            forward_data[0],
             proposal_start_idx,
+            init_mask,
+            extra_proposal_masks=proposal_masks,
             is_forward=False,
         )
 
@@ -362,25 +368,27 @@ class BeamSearchInferenceEngine:
         start_idx,
         end_idx,
         beam_width,
-        init_mask,
         proposal_start_idx,
+        init_mask: np.ndarray,
+        extra_proposal_masks: List[np.ndarray] = [],
         is_forward=True,
     ):
         filter_for_tracing, filter_next_round, filter_done = self.make_filter(
             start_idx, end_idx, is_forward
         )
-
+        proposal_masks = [init_mask, *extra_proposal_masks]
         options: List[BeamSearchOptionData] = [
             BeamSearchOptionData(
-                mask_logits=init_mask,
+                mask_logits=proposal_mask,
                 frame_idx=None,
                 next_frame_idx=(
                     proposal_start_idx if is_forward else proposal_start_idx - 1
                 ),
             )
+            for proposal_mask in proposal_masks
         ]
         tracing_tool = Tracing()
-        tracing_tool.add(options[0])
+        tracing_tool.add_multi(options)
         while len(options) > 0:
             buffer: List[BeamSearchOptionData] = []
             for option in options:
@@ -390,13 +398,12 @@ class BeamSearchInferenceEngine:
 
             options = self.ranking_fn(buffer)[:beam_width]
             options = list(filter(filter_for_tracing, options))
-            for option in options:
-                tracing_tool.add(option)
+            tracing_tool.add_multi(options)
 
             options = list(filter(filter_next_round, options))
             pass
 
-        # Tracing forward
+        # Start Tracing
         done_option = filter(filter_done, tracing_tool.flatten())
         best_option: BeamSearchOptionData = max(done_option, key=lambda x: x.score)
         data = [best_option.get_mask()]

@@ -35,6 +35,11 @@ class Tracing:
         self.trace_dict: Dict[str, BeamSearchTracing] = {}
         pass
 
+    def add_multi(self, objs: List[BeamSearchOptionData]):
+        for obj in objs:
+            self.add(obj)
+            pass
+
     def add(self, obj: BeamSearchOptionData):
         # Register itself into the system
         self.trace_dict[obj.obj_id] = BeamSearchTracing(data=obj)
