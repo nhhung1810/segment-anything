@@ -9,7 +9,6 @@ from SurfaceDice import (
     compute_surface_dice_at_tolerance,
     compute_dice_coefficient,
 )
-from tabulate import tabulate
 import pandas as pd
 from datetime import datetime
 import argparse
@@ -20,12 +19,13 @@ parser = argparse.ArgumentParser("Fast evaluation, tested against the official o
 parser.add_argument(
     "-n", "--name", type=str, help="Experiment name", default="Untitled"
 )
+parser.add_argument(
+    "-pid", "--pid", type=str, help="PID to output the log", default=None
+)
 parser.add_argument("-g", "--gt_dir", type=str, help="Ground Truth directory")
 parser.add_argument("-p", "--pred_dir", type=str, help="Prediction directory")
 
 NUM_CLASSES = 13
-LOG = "runs/vallog.csv"
-df = pd.read_csv(LOG)
 
 
 def compute(zipped_data):
@@ -74,7 +74,7 @@ def compute(zipped_data):
     return seg_metrics
 
 
-def eval(args):
+def eval(args, df: pd.DataFrame, log_path: str):
     seg_path = args.pred_dir
     gt_path = args.gt_dir
     EXPERIMENT_NAME = args.name
@@ -129,8 +129,9 @@ def eval(args):
     df2 = pd.DataFrame(
         [[date] + list(df_dict.values())], columns=["Date"] + list(df_dict.keys())
     )
-    pd.concat([df, df2]).to_csv(LOG, index=False)
-    with open(os.path.join(seg_path, "all-result.json"), 'w') as out:
+
+    pd.concat([df, df2]).to_csv(log_path, index=False)
+    with open(os.path.join(seg_path, "all-result.json"), "w") as out:
         json.dump(seg_metrics, out)
     # Print table
     # table = tabulate(seg_metrics, headers="keys", tablefmt="fancy_grid")
@@ -142,7 +143,17 @@ if __name__ == "__main__":
     from time import time_ns
 
     args = parser.parse_args()
+    pid = args.pid
+    BASE_LOG = "runs/vallog.csv"
+    pid_log = f"runs/vallog-{pid}.csv"
+    # Construct the pid_log first
+    if not os.path.exists(pid_log):
+        df = pd.read_csv(BASE_LOG)
+        df.to_csv(pid_log, index=False)
+        pass
+
+    df = pd.read_csv(pid_log)
     start = time_ns()
-    eval(args)
+    eval(args, df, log_path=pid_log)
     stop = time_ns()
     print(f"Time elapsed: {(stop-start)/10**6}ms")

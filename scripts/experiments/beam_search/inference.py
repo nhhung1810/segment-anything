@@ -1,22 +1,16 @@
 from glob import glob
+import json
 import os
-import sys
 from time import time_ns
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 import numpy as np
-from torch import Tensor
-import torch
 from tqdm import tqdm
 
 # from scripts.constants import FLARE22_LABEL_ENUM
 from scripts.datasets.constant import (
-    DATASET_ROOT,
     IMAGE_TYPE,
-    TRAIN_NON_PROCESSED,
     TEST_NON_PROCESSED,
-    FLARE22_LABEL_ENUM,
 )
-from scripts.datasets.flare22_mask_aug import FLARE22_MaskAug
 from scripts.datasets.preprocess_raw import FLARE22_Preprocess
 from scripts.experiments.beam_search.beam_search_engine import BeamSearchInferenceEngine
 from scripts.sam_train import SamTrain
@@ -25,15 +19,12 @@ from scripts.datasets.constant import DEFAULT_DEVICE
 from scripts.tools.evaluation.loading import post_process
 
 # from scripts.tools.profiling import GPUProfiler
-from scripts.utils import make_directory, pick, torch_try_load
+from scripts.utils import make_directory, omit, torch_try_load, pick
 from segment_anything.build_sam import sam_model_registry
-from segment_anything.modeling import sam
 from segment_anything.modeling.sam import Sam
 from scripts.losses.loss import DiceLoss
 from argparse import ArgumentParser
-import matplotlib.pyplot as plt
 
-from segment_anything.utils.amg import calculate_stability_score
 from loguru import logger
 
 
@@ -61,10 +52,25 @@ def inference(
     inference_save_dir: str,
     device: str,
     use_cache: bool,
+    beam_search_config_path: str = None,
 ):
     assert len(images) == len(gts)
     preprocessor = FLARE22_Preprocess()
     total_times = []
+    if beam_search_config_path is not None:
+        assert os.path.exists(beam_search_config_path)
+        with open(beam_search_config_path, "r") as out:
+            beam_search_config: Dict = json.load(beam_search_config_path)
+    else:
+        # TODO: add default
+        beam_search_config: Dict = BeamSearchInferenceEngine.make_default_config()
+
+    # Only take what it need
+    beam_search_config = pick(
+        beam_search_config,
+        keys=list(BeamSearchInferenceEngine.make_default_config().keys()),
+    )
+
     for image_file, gt_file in tqdm(
         zip(images, gts), total=len(images), desc="Inference for patient..."
     ):
@@ -82,12 +88,7 @@ def inference(
             caches=cache_volume,
             masks=masks,
             sam_train=sam_train,
-            stability_config=None,
-            start_radius=3,
-            seed=None,
-            gaussian_config={"sigma": 10.0},
-            strategy_name="local-mean-centroid",
-            allow_evolution=True,
+            **beam_search_config,
         )
 
         start_idx = engine.starts[1]
@@ -149,6 +150,12 @@ parser.add_argument(
     help="Allow the model to use embedding cache for faster inference",
     default=False,
 )
+parser.add_argument(
+    "--beam_search_config_path",
+    type=str,
+    help="Algorithm config path to be loaded",
+    default=None,
+)
 
 parser.add_argument(
     "--selected_class",
@@ -158,36 +165,8 @@ parser.add_argument(
     default=None,  # for liver and gallbladder
 )
 
-if __name__ == "__main__":
-    args = parser.parse_args()
-    device = f"cuda:{args.cuda}" if "cuda" in DEFAULT_DEVICE else DEFAULT_DEVICE
 
-    run_path = "mask-prop-230509-005503"
-    model_path = args.checkpoint or f"runs/{run_path}/model-100.pt"
-    # model_path = "./runs/transfer/imp-230603-150046/model-20.pt"
-    model = load_model(model_path, device)
-    sam_train = SamTrain(sam_model=model)
-
-    inference_save_dir = args.output_dir
-    input_dir = args.input_dir
-    label_dir = args.label_dir
-    use_cache = args.use_cache
-    # selected_class = args.selected_class or list(range(1, 14))
-    # for c in selected_class:
-    #     assert c in range(1, 14)
-    selected_class = [1]
-    print(
-        f"""
-        model-path     : {model_path}
-        save-dir       :  {inference_save_dir}
-        input-dir      : {input_dir}
-        label-dir      : {label_dir}
-        is-use-cache   : {use_cache}
-        selected-class : {selected_class}
-        """
-    )
-    make_directory(inference_save_dir)
-
+def make_input_path(input_dir, label_dir):
     images_path: List[str] = sorted(glob(f"{input_dir}/*.nii.gz"))
     images_path = [os.path.basename(p) for p in images_path]
     # By some way, they don't have gallbladder,
@@ -208,7 +187,39 @@ if __name__ == "__main__":
         assert os.path.exists(i), f"{i}"
         assert os.path.exists(p), f"{p}"
         pass
+    return images_path, labels_path
 
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+    device = f"cuda:{args.cuda}" if "cuda" in DEFAULT_DEVICE else DEFAULT_DEVICE
+
+    run_path = "mask-prop-230509-005503"
+    model_path = args.checkpoint or f"runs/{run_path}/model-100.pt"
+    # model_path = "./runs/transfer/imp-230603-150046/model-20.pt"
+    model = load_model(model_path, device)
+    sam_train = SamTrain(sam_model=model)
+
+    inference_save_dir = args.output_dir
+    input_dir = args.input_dir
+    label_dir = args.label_dir
+    use_cache = args.use_cache
+    beam_search_config_path = args.beam_search_config_path
+    selected_class = [1]
+    print(
+        f"""
+        model-path     : {model_path}
+        save-dir       : {inference_save_dir}
+        input-dir      : {input_dir}
+        label-dir      : {label_dir}
+        is-use-cache   : {use_cache}
+        selected-class : {selected_class}
+        bs-config-path : {beam_search_config_path}
+        """
+    )
+    make_directory(inference_save_dir)
+
+    images_path, labels_path = make_input_path(input_dir, label_dir)
     total_times = inference(
         images=images_path,
         gts=labels_path,
@@ -216,6 +227,7 @@ if __name__ == "__main__":
         sam_train=sam_train,
         device=device,
         use_cache=use_cache,
+        beam_search_config_path=beam_search_config_path,
     )
     logger.success(f"Mean time: {np.mean(total_times)}")
 

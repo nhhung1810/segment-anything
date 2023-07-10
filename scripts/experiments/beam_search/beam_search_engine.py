@@ -119,6 +119,17 @@ class BeamSearchInferenceEngine:
         self.starts, self.ends = get_all_organ_range(masks)
         pass
 
+    @staticmethod
+    def make_default_config(cls) -> Dict[str, object]:
+        return {
+            "stability_config": None,
+            "start_radius": 3,
+            "seed": None,
+            "gaussian_config": {"sigma": 10.0},
+            "strategy_name": "local-mean-centroid",
+            "allow_evolution": True,
+        }
+
     def prepare_default_stability_config(self, stability_config: Dict[str, object]):
         stability_config = stability_config or {}
         stability_config["threshold_start"] = stability_config.get(
@@ -348,7 +359,7 @@ class BeamSearchInferenceEngine:
         )
         proposal_masks = [
             forward_data[0],  # This is the middle frame
-            forward_data[-1],  # This is the last frame
+            # forward_data[-1],  # This is the last frame
         ]
 
         backward_data = self.beam_search(
