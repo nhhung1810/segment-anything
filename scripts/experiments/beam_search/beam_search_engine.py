@@ -111,7 +111,7 @@ class BeamSearchInferenceEngine:
         self.masks = masks
         self.seed = seed or time_ns() % (2**32 - 1)
         self.gaussian_config = gaussian_config
-        self.start_radius = start_radius
+        self.start_radius = int(start_radius)
         self.strategy_name = strategy_name
         self.allow_evolution = allow_evolution
         self.sam_train = sam_train
@@ -120,7 +120,7 @@ class BeamSearchInferenceEngine:
         pass
 
     @staticmethod
-    def make_default_config(cls) -> Dict[str, object]:
+    def make_default_config() -> Dict[str, object]:
         return {
             "stability_config": None,
             "start_radius": 3,
@@ -159,6 +159,7 @@ class BeamSearchInferenceEngine:
             return_logits=True,
             mask_input=mask_input_torch,
         )
+        mask_logits = mask_logits.cpu()
 
         mask_pred = mask_logits > 0.0
 
@@ -311,7 +312,7 @@ class BeamSearchInferenceEngine:
             init_mask = torch.as_tensor(self.masks[start_idx - 1].copy() == target_idx)
             init_mask = pick_one_pixel(
                 init_mask,
-                radius=self.start_radius,
+                radius=int(self.start_radius),
                 gaussian_config=self.gaussian_config,
                 seed=self.seed,
             )
@@ -328,7 +329,7 @@ class BeamSearchInferenceEngine:
             init_mask = make_gauss_point_mask(
                 x=x,
                 y=y,
-                radius=self.start_radius,
+                radius=int(self.start_radius),
                 gaussian_config=self.gaussian_config,
             )
             return init_mask, z

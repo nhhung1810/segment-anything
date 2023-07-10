@@ -60,7 +60,7 @@ def inference(
     if beam_search_config_path is not None:
         assert os.path.exists(beam_search_config_path)
         with open(beam_search_config_path, "r") as out:
-            beam_search_config: Dict = json.load(beam_search_config_path)
+            beam_search_config: Dict = json.load(out)
     else:
         # TODO: add default
         beam_search_config: Dict = BeamSearchInferenceEngine.make_default_config()
