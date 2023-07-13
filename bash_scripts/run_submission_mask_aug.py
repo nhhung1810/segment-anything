@@ -39,6 +39,24 @@ parser.add_argument(
     help="Is skip eval?",
     default=False,
 )
+parser.add_argument(
+    "--force_ckpt",
+    type=int,
+    help="Ignore the limit and only evaluate the given checkpoint",
+    default=None,
+)
+parser.add_argument(
+    "--cuda",
+    type=int,
+    help="CUDA index",
+    default=1,
+)
+parser.add_argument(
+    "--pid",
+    type=int,
+    help="PID index",
+    default=None,
+)
 
 args = parser.parse_args()
 
@@ -50,11 +68,15 @@ if __name__ == "__main__":
     is_custom_class = args.is_custom_class
     is_skip_eval = args.skip_eval
     model = list(natsorted(list(glob(f"{model_dir}/*.pt"))))
-    if limit is not None: 
-        if limit > 0:
-            model = model[-limit:]
-        else:
-            model = model[:-limit]
+    force_ckpt = args.force_ckpt
+    if force_ckpt is None:
+        if limit is not None: 
+            if limit > 0:
+                model = model[-limit:]
+            else:
+                model = model[:-limit]
+    else:
+        model = list(natsorted(list(glob(f"{model_dir}/model-{force_ckpt}.pt"))))
     
     for model_path in tqdm(model, total=len(model), desc="Invoke the evaluation script..."):
         model_name = os.path.basename(os.path.dirname(model_path))
@@ -62,6 +84,7 @@ if __name__ == "__main__":
         output_dir = f"runs/submission/{model_name}/{check_point}/"
         eval_cmd = f"""
             python scripts/tools/evaluation/DSC_NSD_eval_fast.py\
+                -pid {args.pid} \
                 -g {TEST_NON_PROCESSED}/labels\
                 -p {output_dir}\
                 --name "{prefix}-{model_name}-{check_point}"
@@ -75,6 +98,7 @@ if __name__ == "__main__":
         else:
             run_inference_cmd = f"""
             python scripts/experiments/mask_aug/inference.py\
+                --cuda={args.cuda} \
                 --selected_class 1 9 \
                 --checkpoint {model_path} \
                 --output_dir {output_dir} && {eval_cmd}

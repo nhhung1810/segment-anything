@@ -20,7 +20,7 @@ parser.add_argument(
     "-n", "--name", type=str, help="Experiment name", default="Untitled"
 )
 parser.add_argument(
-    "-pid", "--pid", type=str, help="PID to output the log", default=None
+    "-pid", "--pid", type=str, help="PID to output the log", default='default'
 )
 parser.add_argument("-g", "--gt_dir", type=str, help="Ground Truth directory")
 parser.add_argument("-p", "--pred_dir", type=str, help="Prediction directory")

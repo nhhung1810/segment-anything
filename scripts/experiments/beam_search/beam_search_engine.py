@@ -242,10 +242,16 @@ class BeamSearchInferenceEngine:
         chosen_idx, mask_logits = self.core_inference(
             idx=prev_option.frame_idx, previous_mask=previous_mask
         )
-        score = self.confidence_score(
-            mask_logits=mask_logits[0, chosen_idx],
-            threshold=0.5,
+        score = self.calculate_stability_score_with_sigmoid(
+            masks=mask_logits[0, chosen_idx],
+            mask_threshold=0.5,
+            threshold_offset=self.stability_config['offset']
         )
+        
+        # score = self.confidence_score(
+        #     mask_logits=mask_logits[0, chosen_idx],
+        #     threshold=0.5,
+        # )
         score = prev_score + np.log(score + 1e-30)
         if score < prev_option.score:
             return []
@@ -278,15 +284,15 @@ class BeamSearchInferenceEngine:
         end = self.stability_config["threshold_end"]
         num = self.stability_config["threshold_num"]
         for value in np.linspace(start=start, stop=end, num=num):
-            # score = self.calculate_stability_score_with_sigmoid(
-            #     masks=current_chosen_mask_logits,
-            #     mask_threshold=value,
-            #     threshold_offset=self.stability_config['offset']
-            #     )
-            score = self.confidence_score(
-                mask_logits=current_chosen_mask_logits,
-                threshold=value,
-            )
+            score = self.calculate_stability_score_with_sigmoid(
+                masks=current_chosen_mask_logits,
+                mask_threshold=value,
+                threshold_offset=self.stability_config['offset']
+                )
+            # score = self.confidence_score(
+            #     mask_logits=current_chosen_mask_logits,
+            #     threshold=value,
+            # )
             score = prev_score + np.log(score + 1e-30)
             new_option = BeamSearchOptionData(
                 sigmoid_threshold=value,

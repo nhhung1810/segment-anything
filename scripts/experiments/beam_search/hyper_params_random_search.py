@@ -1,7 +1,9 @@
+from copy import deepcopy
+from glob import glob
 import json
 import os
 import shutil
-from typing import Dict
+from typing import Dict, List
 from uuid import uuid4
 from sklearn.model_selection import ParameterSampler
 from scipy.stats.distributions import expon, uniform
@@ -37,6 +39,16 @@ def flatten(dictionary: Dict[str, object]):
 #     "gaussian_config.sigma": [3.0, 5.0, 10.0, 15.0, 20.0, 50.0],
 # }
 
+# round_2_config = {
+#     "stability_config": [True],
+#     "stability_config.threshold_start": [0.4],
+#     "stability_config.threshold_stop": [0.9],
+#     "stability_config.threshold_num": [10, 20],
+#     "start_radius": uniform(loc=60, scale=100), # loc -> loc + scale
+#     # gaussian kernel size -> radius = round(4.0 * sigma)
+#     "gaussian_config.sigma": uniform(loc=1, scale=40),
+# }
+
 class RandomSearchGenerator:
     def __init__(self) -> None:
         self.fix_config = {
@@ -48,10 +60,10 @@ class RandomSearchGenerator:
             "stability_config": [True],
             "stability_config.threshold_start": [0.4],
             "stability_config.threshold_stop": [0.9],
-            "stability_config.threshold_num": [10, 20],
-            "start_radius": uniform(loc=60, scale=100), # loc -> loc + scale
+            "stability_config.threshold_num": [10],
+            "start_radius": [120],
             # gaussian kernel size -> radius = round(4.0 * sigma)
-            "gaussian_config.sigma": uniform(loc=1, scale=40),
+            "gaussian_config.sigma": [21.0], # hyper-search result
         }
         pass
 
@@ -118,6 +130,20 @@ class RandomSearchGenerator:
                 json.dump(config, out)
                 pass
 
+    def generate_model_and_save(self, model_paths: List[str], config_dir: str):
+        make_directory(config_dir)
+        config = next(self.generate('', n_iter=1))
+        for model_path in model_paths:
+            if config is None: continue
+            new_config = deepcopy(config)
+            new_config["hash_name"] = uuid4().hex
+            new_config['model_path'] = model_path
+            hash_name = new_config["hash_name"]
+            
+            with open(os.path.join(config_dir, f"{hash_name}.json"), "w") as out:
+                json.dump(new_config, out)
+                pass
+
     def collect_beam_search_result(self, config_dir):
         all_result = []
         # Collect hash-names
@@ -157,10 +183,26 @@ class RandomSearchGenerator:
 
 if __name__ == "__main__":
     generator = RandomSearchGenerator()
-    model_path = "./runs/imp-aug-230610-211354/model-40.pt"
-    config_dir = model_path.replace(".pt", "-beam-config/") 
+    # patterns = [
+    #     "runs/imp-230603-150046/model-*.pt",
+    #     "runs/imp-230608-231031/model-*.pt",
+    #     "runs/imp-230610-011507/model-*.pt",
+    #     "runs/imp-aug-230605-000452/model-*.pt",
+    #     "runs/imp-aug-230605-165716/model-*.pt",
+    #     "runs/imp-aug-230606-002414/model-*.pt",
+    #     "runs/imp-aug-230608-003029/model-*.pt",
+    #     "runs/imp-aug-230610-104249/model-*.pt",
+    #     "runs/imp-aug-230610-211354/model-*.pt",
+    # ]
+    # model_paths = [
+    #     p for pattern in patterns for p in list(glob(pattern))
+    # ]
+    model_paths = ['runs/imp-aug-230605-165716/model-35.pt']
+    print(len(model_paths))
+    
+    config_dir = "runs/beam-seach-cfd/"
     # output_path = generator.collect_beam_search_result(config_dir)
     # print(f"Output path: {output_path}")
-    generator.generate_and_save(model_path=model_path, config_dir=config_dir, n_iter=40)
+    generator.generate_model_and_save(model_paths=model_paths, config_dir=config_dir)
     print(f"Paste this into the run submission: {config_dir}")
     pass

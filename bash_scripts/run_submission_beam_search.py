@@ -153,6 +153,7 @@ if __name__ == "__main__":
             )
             run_inference_cmd = f"""
             python scripts/experiments/beam_search/inference.py\
+                --cuda {idx%2}\
                 --beam_search_config_path {config_path} \
                 --checkpoint {model_path} \
                 --output_dir {output_dir} && {eval_cmd}

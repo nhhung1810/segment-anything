@@ -39,6 +39,12 @@ parser.add_argument(
     help="Is skip eval?",
     default=False,
 )
+parser.add_argument(
+    "--force_ckpt",
+    type=int,
+    help="Ignore the limit and only evaluate the given checkpoint",
+    default=None,
+)
 
 args = parser.parse_args()
 
@@ -50,15 +56,18 @@ if __name__ == "__main__":
     is_custom_class = args.is_custom_class
     is_skip_eval = args.skip_eval
     model = list(natsorted(list(glob(f"{model_dir}/*.pt"))))
-    if limit is not None: 
-        if limit > 0:
-            model = model[-limit:]
-        else:
-            model = model[:-limit]
+    force_ckpt = args.force_ckpt
+    if force_ckpt is None:
+        if limit is not None: 
+            if limit > 0:
+                model = model[-limit:]
+            else:
+                model = model[:-limit]
+    else:
+        model = list(natsorted(list(glob(f"{model_dir}/model-{force_ckpt}.pt"))))
 
     # Skip some small step
     # model = [p for p in model if int(os.path.basename(p).replace(".pt", "").split("-")[1]) % 10 == 0]
-
     for model_path in tqdm(model, total=len(model), desc="Invoke the evaluation script..."):
         model_name = os.path.basename(os.path.dirname(model_path))
         check_point = os.path.basename(model_path).replace(".pt", "").split("-")[1]

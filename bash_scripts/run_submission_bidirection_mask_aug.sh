@@ -3,9 +3,10 @@
 # Mask augmentation
 
 python bash_scripts/run_submission_bidirection_mask_aug.py \
-    --model_dir "runs/imp-aug-230606-002414" \
+    --model_dir "runs/imp-aug-230610-104249/" \
     --is_custom_class 1 \
-    --prefix "e3"
+    --prefix "thesis-e3" \
+    --force_ckpt 65
 
 # python bash_scripts/run_submission_bidirection_mask_aug.py \
 #     --model_dir "runs/mask-aug-230521-004441" \
