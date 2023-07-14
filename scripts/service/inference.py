@@ -120,10 +120,11 @@ class InferenceService:
 
 def parse_bbox_data(data: Dict[str, object]):
     bboxes = data["annotationData"]["bboxes"][0]
-    x = int(bboxes["x"])
-    y = int(bboxes["y"])
-    w = int(bboxes["width"])
-    h = int(bboxes["height"])
+    scaleRate = data["annotationData"]["scaleRate"]
+    x = int(bboxes["x"] / scaleRate)
+    y = int(bboxes["y"] / scaleRate)
+    w = int(bboxes["width"] / scaleRate)
+    h = int(bboxes["height"] / scaleRate)
     return x, y, w, h
 
 

@@ -1,3 +1,4 @@
+import itertools
 import numpy as np
 import torch
 from torch import Tensor
@@ -14,7 +15,7 @@ from scripts.experiments.mask_aug.inference import get_all_organ_range, pick_bes
 from scripts.sam_train import SamTrain
 from scripts.utils import torch_try_load
 from time import time_ns
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 
 preprocessor = FLARE22_Preprocess()
 FILTER_TYPE = Callable[[BeamSearchOptionData], bool]
@@ -101,6 +102,7 @@ class BeamSearchInferenceEngine:
         sam_train: SamTrain,
         stability_config: Dict[str, object],
         gaussian_config: Dict[str, object],
+        grid_config: Dict[str, object],
         start_radius: float,
         seed: int = None,
         strategy_name: str = "",
@@ -116,7 +118,9 @@ class BeamSearchInferenceEngine:
         self.allow_evolution = allow_evolution
         self.sam_train = sam_train
         self.stability_config = self.prepare_default_stability_config(stability_config)
+        self.grid_config = self.prepare_default_grid_config(grid_config)
         self.starts, self.ends = get_all_organ_range(masks)
+
         pass
 
     @staticmethod
@@ -129,6 +133,12 @@ class BeamSearchInferenceEngine:
             "strategy_name": "local-mean-centroid",
             "allow_evolution": True,
         }
+
+    def prepare_default_grid_config(self, grid_config: Dict[str, object]):
+        grid_config = grid_config or {}
+        grid_config["width"] = grid_config.get("width", 200)
+        grid_config["count"] = grid_config.get("count", 3)
+        return grid_config
 
     def prepare_default_stability_config(self, stability_config: Dict[str, object]):
         stability_config = stability_config or {}
@@ -177,15 +187,17 @@ class BeamSearchInferenceEngine:
         # Idea: confidence is high when the prob of
         # foreground high and prob of background is low
         sigmoid_mask = torch.sigmoid(mask_logits).numpy()
-        foreground_score = self.safe_mean(sigmoid_mask[sigmoid_mask >= threshold])
-        background_score = 1.0 - self.safe_mean(sigmoid_mask[sigmoid_mask < threshold])
+        foreground_score = self.safe_mean(sigmoid_mask[sigmoid_mask >= threshold], 0.0)
+        background_score = 1.0 - self.safe_mean(
+            sigmoid_mask[sigmoid_mask < threshold], 1.0
+        )
         return np.mean([foreground_score, background_score])
 
-    def safe_mean(self, x) -> np.ndarray:
-        return np.nan_to_num(np.mean(x), 0.0)
+    def safe_mean(self, x, penalty=0.0) -> np.ndarray:
+        return np.nan_to_num(np.mean(x), penalty)
 
     def calculate_stability_score_with_sigmoid(
-        self, masks: torch.Tensor, mask_threshold: float, threshold_offset: float
+        self, masks: torch.Tensor, mask_threshold: float, threshold_offset: float = 0.1
     ) -> torch.Tensor:
         """
         Exactly like the `calculate_stability_score`, but using sigmoid for better scale
@@ -284,15 +296,15 @@ class BeamSearchInferenceEngine:
         end = self.stability_config["threshold_end"]
         num = self.stability_config["threshold_num"]
         for value in np.linspace(start=start, stop=end, num=num):
-            score = self.calculate_stability_score_with_sigmoid(
-                masks=current_chosen_mask_logits,
-                mask_threshold=value,
-                threshold_offset=self.stability_config['offset']
-                )
-            # score = self.confidence_score(
-            #     mask_logits=current_chosen_mask_logits,
-            #     threshold=value,
-            # )
+            # score = self.calculate_stability_score_with_sigmoid(
+            #     masks=current_chosen_mask_logits,
+            #     mask_threshold=value,
+            #     threshold_offset=self.stability_config['offset']
+            #     )
+            score = self.confidence_score(
+                mask_logits=current_chosen_mask_logits,
+                threshold=value,
+            )
             score = prev_score + np.log(score + 1e-30)
             new_option = BeamSearchOptionData(
                 sigmoid_threshold=value,
@@ -311,7 +323,9 @@ class BeamSearchInferenceEngine:
             return []
         return sorted(options, key=lambda x: x.score, reverse=True)
 
-    def seeding_strategies(self, target_idx: int, **kwargs):
+    def seeding_strategies(
+        self, target_idx: int, **kwargs
+    ) -> Tuple[List[np.ndarray], int]:
         start_idx = kwargs["start_idx"]
         end_idx = kwargs["end_idx"]
         if self.strategy_name == "random-pick-one":
@@ -322,7 +336,7 @@ class BeamSearchInferenceEngine:
                 gaussian_config=self.gaussian_config,
                 seed=self.seed,
             )
-            return init_mask, start_idx
+            return [init_mask], start_idx
 
         if self.strategy_name == "local-mean-centroid":
             assert target_idx == 1, f"Only support target-idx == 1, given {target_idx}"
@@ -338,10 +352,57 @@ class BeamSearchInferenceEngine:
                 radius=int(self.start_radius),
                 gaussian_config=self.gaussian_config,
             )
-            return init_mask, z
+            return [init_mask], z
+
+        if self.strategy_name == "local-mean-centroid-with-grid":
+            assert target_idx == 1, f"Only support target-idx == 1, given {target_idx}"
+            proposal = make_centroid(self.masks, self.LOCAL_MEAN_CENTROID)
+            z, y, x = proposal[1].tolist()
+            assert (
+                z > start_idx and z < end_idx
+            ), f"Proposal {z=} is out of wanted range: ({start_idx}, {end_idx})"
+            init_masks = self.make_grid_centroid(
+                x,
+                y,
+            )
+            return init_masks, z
 
         init_mask = torch.as_tensor(self.masks[start_idx - 1].copy() == target_idx)
-        return init_mask, start_idx
+        return [init_mask], start_idx
+
+    def make_grid_centroid(self, x, y):
+        width, count = self.grid_config["width"], self.grid_config["count"]
+        xs = np.ceil(
+            np.linspace(
+                start=x - width / 2,
+                stop=x + width / 2,
+                num=count,
+            )
+        ).astype(np.int32)
+        ys = np.ceil(
+            np.linspace(start=y - width / 2, stop=y + width / 2, num=count)
+        ).astype(np.int32)
+        init_masks = []
+        max_dist = 0.0
+        for x_point, y_point in list(itertools.product(xs, ys)):
+            max_dist = max(
+                max_dist, np.sqrt(np.square(x_point - x) + np.square(y_point - y))
+            )
+        for x_point, y_point in list(itertools.product(xs, ys)):
+            dist = np.sqrt(np.square(x_point - x) + np.square(y_point - y))
+            ratio = 1 - dist / max_dist
+            radius = int(int(self.start_radius) * ratio)
+            radius = max(radius, 3)
+            # print(x_point, y_point, radius, ratio)
+            _tmp = make_gauss_point_mask(
+                x=x_point,
+                y=y_point,
+                radius=radius,
+                gaussian_config=self.gaussian_config,
+            )
+            init_masks.append(_tmp)
+
+        return init_masks
 
     def beam_search_inference(
         self,
@@ -350,36 +411,43 @@ class BeamSearchInferenceEngine:
         target_idx: int,
         beam_width: int = 3,
     ):
-        init_mask, proposal_start_idx = self.seeding_strategies(
+        init_masks, proposal_start_idx = self.seeding_strategies(
             target_idx=target_idx,
             start_idx=start_idx,
             end_idx=end_idx,
         )
 
-        forward_data = self.beam_search(
+        forward_data, forward_score = self.beam_search(
             start_idx,
             end_idx,
             beam_width,
             proposal_start_idx,
-            init_mask,
             is_forward=True,
+            proposal_masks=init_masks,
         )
         proposal_masks = [
+            *init_masks,
             forward_data[0],  # This is the middle frame
             # forward_data[-1],  # This is the last frame
         ]
 
-        backward_data = self.beam_search(
+        backward_data, backward_score = self.beam_search(
             start_idx,
             end_idx,
             beam_width,
             proposal_start_idx,
-            init_mask,
-            extra_proposal_masks=proposal_masks,
+            proposal_masks=proposal_masks,
             is_forward=False,
         )
 
-        return forward_data, backward_data, init_mask, proposal_start_idx
+        return (
+            forward_data,
+            backward_data,
+            init_masks,
+            proposal_start_idx,
+            forward_score,
+            backward_score,
+        )
 
     def beam_search(
         self,
@@ -387,14 +455,12 @@ class BeamSearchInferenceEngine:
         end_idx,
         beam_width,
         proposal_start_idx,
-        init_mask: np.ndarray,
-        extra_proposal_masks: List[np.ndarray] = [],
+        proposal_masks: List[np.ndarray],
         is_forward=True,
     ):
         filter_for_tracing, filter_next_round, filter_done = self.make_filter(
             start_idx, end_idx, is_forward
         )
-        proposal_masks = [init_mask, *extra_proposal_masks]
         options: List[BeamSearchOptionData] = [
             BeamSearchOptionData(
                 mask_logits=proposal_mask,
@@ -425,11 +491,16 @@ class BeamSearchInferenceEngine:
         done_option = filter(filter_done, tracing_tool.flatten())
         best_option: BeamSearchOptionData = max(done_option, key=lambda x: x.score)
         data = [best_option.get_mask()]
+        score_trace = [best_option.get_confidence_score(self.confidence_score)]
+
         opts = tracing_tool.tracing(prev_id=best_option.prev_id)
         print(list(map(lambda x: x.frame_idx, opts)))
         data.extend([x.get_mask() for x in opts])
+        score_trace.extend(
+            [x.get_confidence_score(self.confidence_score) for x in opts]
+        )
 
-        return data[::-1]
+        return data[::-1], score_trace[::-1]
 
     def make_filter(self, start_idx, end_idx, is_forward):
         if is_forward:
@@ -447,11 +518,20 @@ class BeamSearchInferenceEngine:
 
         return filter_for_tracing, filter_next_round, filter_done
 
-    def compose_result(self, backward_data, forward_data, start_idx, end_idx):
+    def compose_result(
+        self,
+        backward_data,
+        forward_data,
+        forward_score,
+        backward_score,
+        start_idx,
+        end_idx,
+    ):
         data = np.stack([*backward_data[::-1], *forward_data])
+        score = [*backward_score[::-1], *forward_score]
         prediction = np.zeros(self.masks.shape)
         prediction[start_idx : end_idx + 1] = data
-        return prediction
+        return prediction, score
 
 
 if __name__ == "__main__":
@@ -488,6 +568,8 @@ if __name__ == "__main__":
         backward_data,
         init_mask,
         proposal_start_idx,
+        forward_score,
+        backward_score,
     ) = engine.beam_search_inference(
         start_idx=start_idx,
         end_idx=end_idx,
@@ -495,5 +577,7 @@ if __name__ == "__main__":
         beam_width=3,
     )
     print(proposal_start_idx)
-    pred = engine.compose_result(backward_data, forward_data, start_idx, end_idx)
+    pred = engine.compose_result(
+        backward_data, forward_data, forward_score, backward_score, start_idx, end_idx
+    )
     print(pred.shape)

@@ -1,7 +1,7 @@
 import torch
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 from uuid import UUID
 
 
@@ -22,6 +22,11 @@ class BeamSearchOptionData:
             return self.mask_logits
 
         return torch.sigmoid(self.mask_logits) > self.sigmoid_threshold
+
+    def get_confidence_score(
+        self, scoring_fn: Callable[[torch.Tensor, float], float]
+    ) -> float:
+        return scoring_fn(self.mask_logits, self.sigmoid_threshold)
 
 
 @dataclass
