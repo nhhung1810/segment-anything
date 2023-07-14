@@ -75,9 +75,19 @@ class InferenceService:
         return mask
 
     @torch.no_grad()
-    def inference(self, image: np.ndarray, mask: np.ndarray) -> torch.Tensor:
-        # This one resize the edge and apply padding
-        img_emb, original_size, input_size = self.sam_train.prepare_img(image=image)
+    def inference(
+        self,
+        image: np.ndarray,
+        mask: np.ndarray,
+        img_emb: torch.Tensor = None,
+        original_size: torch.Tensor = None,
+        input_size: torch.Tensor = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # This one resize the edge and apply padding. Accept cached.
+        if any(elem is None for elem in [img_emb, original_size, input_size]):
+            img_emb, original_size, input_size = self.sam_train.prepare_img(image=image)
+            pass
+
         # Down-size only 1 biggest side
         _, _, _, mask_input_torch = self.sam_train.prepare_prompt(
             original_size=original_size, mask_input=mask[None, ...]
@@ -100,9 +110,9 @@ class InferenceService:
             previous_mask=mask,
             device=self.device,
         )
-        mask_pred = mask_pred[0, chosen_idx]
+        mask_pred = mask_pred[0, chosen_idx].cpu().numpy()
 
-        return mask_pred.cpu().numpy()
+        return mask_pred, img_emb, original_size, input_size
 
     def decode_image(self, encoded64: str) -> np.ndarray:
         image_decoded = base64.b64decode(encoded64)

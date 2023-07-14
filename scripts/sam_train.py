@@ -86,7 +86,7 @@ class SamTrain:
         self,
         image: np.ndarray,
         image_format: str = "RGB",
-    ) -> None:
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         """
         Calculates the image embeddings for the provided image, allowing
         masks to be predicted with the 'predict' method.
